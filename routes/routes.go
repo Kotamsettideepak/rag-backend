@@ -21,6 +21,8 @@ func RegisterRoutes(r *gin.Engine) {
 
 	r.POST("/upload", api.UploadHandler)
 	r.GET("/status/:job_id", api.StatusHandler)
+	r.GET("/ws/status/:job_id", api.UploadStatusWebSocketHandler)
 	r.POST("/chat", api.ChatHandler)
+	r.GET("/ws", api.ChatWebSocketHandler)
 	r.DELETE("/context", api.ClearContextHandler)
 }

@@ -24,6 +24,7 @@ type Manager struct {
 	pool      *worker.Pool
 	jobQueue  chan queuedJob
 	jobs      map[string]*models.UploadJob
+	jobSubs   map[string]map[string]chan *models.UploadJob
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
@@ -47,6 +48,7 @@ func NewManager() *Manager {
 		embedder:  embedder,
 		store:     db.NewChromaStore(),
 		jobs:      make(map[string]*models.UploadJob),
+		jobSubs:   make(map[string]map[string]chan *models.UploadJob),
 		batchSize: getEnvInt("INGEST_BATCH_SIZE", 8),
 		queryTopK: getEnvInt("QUERY_TOP_K", 4),
 	}
@@ -121,6 +123,49 @@ func (m *Manager) GetJob(jobID string) (*models.UploadJob, bool) {
 	}
 
 	return cloneJob(job), true
+}
+
+func (m *Manager) SubscribeJob(jobID string) (<-chan *models.UploadJob, func(), error) {
+	m.mu.Lock()
+	job, ok := m.jobs[jobID]
+	if !ok {
+		m.mu.Unlock()
+		return nil, nil, fmt.Errorf("job not found")
+	}
+
+	subID := generateID()
+	updates := make(chan *models.UploadJob, 8)
+	if _, exists := m.jobSubs[jobID]; !exists {
+		m.jobSubs[jobID] = make(map[string]chan *models.UploadJob)
+	}
+	m.jobSubs[jobID][subID] = updates
+	snapshot := cloneJob(job)
+	m.mu.Unlock()
+
+	updates <- snapshot
+
+	unsubscribe := func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		subscribers, exists := m.jobSubs[jobID]
+		if !exists {
+			return
+		}
+
+		ch, exists := subscribers[subID]
+		if !exists {
+			return
+		}
+
+		delete(subscribers, subID)
+		close(ch)
+		if len(subscribers) == 0 {
+			delete(m.jobSubs, jobID)
+		}
+	}
+
+	return updates, unsubscribe, nil
 }
 
 func (m *Manager) SearchContext(ctx context.Context, question string) (string, error) {
@@ -312,22 +357,24 @@ func (m *Manager) failJob(jobID string, err error) {
 
 func (m *Manager) updateJob(jobID string, update func(*models.UploadJob)) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	job, ok := m.jobs[jobID]
 	if !ok {
+		m.mu.Unlock()
 		return
 	}
 
 	update(job)
+	snapshot := cloneJob(job)
+	subscribers := copySubscribers(m.jobSubs[jobID])
+	m.mu.Unlock()
+	m.publishJobSnapshot(snapshot, subscribers)
 }
 
 func (m *Manager) updateFile(jobID string, fileID string, update func(*models.FileResult)) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	job, ok := m.jobs[jobID]
 	if !ok {
+		m.mu.Unlock()
 		return
 	}
 
@@ -335,9 +382,15 @@ func (m *Manager) updateFile(jobID string, fileID string, update func(*models.Fi
 		if job.Files[index].FileID == fileID {
 			update(&job.Files[index])
 			job.UpdatedAt = time.Now().UTC()
+			snapshot := cloneJob(job)
+			subscribers := copySubscribers(m.jobSubs[jobID])
+			m.mu.Unlock()
+			m.publishJobSnapshot(snapshot, subscribers)
 			return
 		}
 	}
+
+	m.mu.Unlock()
 }
 
 func splitIntoBatches(chunks []models.Chunk, batchSize int) [][]models.Chunk {
@@ -364,6 +417,39 @@ func cloneJob(job *models.UploadJob) *models.UploadJob {
 	cloned := *job
 	cloned.Files = append([]models.FileResult(nil), job.Files...)
 	return &cloned
+}
+
+func copySubscribers(source map[string]chan *models.UploadJob) []chan *models.UploadJob {
+	if len(source) == 0 {
+		return nil
+	}
+
+	cloned := make([]chan *models.UploadJob, 0, len(source))
+	for _, subscriber := range source {
+		cloned = append(cloned, subscriber)
+	}
+	return cloned
+}
+
+func (m *Manager) publishJobSnapshot(job *models.UploadJob, subscribers []chan *models.UploadJob) {
+	if job == nil || len(subscribers) == 0 {
+		return
+	}
+
+	for _, subscriber := range subscribers {
+		select {
+		case subscriber <- cloneJob(job):
+		default:
+			select {
+			case <-subscriber:
+			default:
+			}
+			select {
+			case subscriber <- cloneJob(job):
+			default:
+			}
+		}
+	}
 }
 
 func getEnvInt(key string, fallback int) int {

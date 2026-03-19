@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -42,6 +43,12 @@ type GenerateRequest struct {
 
 type GenerateResponse struct {
 	Response string `json:"response"`
+}
+
+type StreamGenerateResponse struct {
+	Response string `json:"response"`
+	Done     bool   `json:"done"`
+	Error    string `json:"error,omitempty"`
 }
 
 type EmbeddingRequest struct {
@@ -142,6 +149,72 @@ func (o *OllamaClient) GenerateText(prompt string) (string, error) {
 	}
 
 	return res.Response, nil
+}
+
+func (o *OllamaClient) GenerateTextStream(ctx context.Context, prompt string, onChunk func(string) error) (string, error) {
+	reqBody := GenerateRequest{
+		Model:  MODEL_LLM,
+		Prompt: prompt,
+		Stream: true,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return "", err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", o.BaseURL+GENERATE_API, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := o.Client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ollama error: %s", string(body))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var fullResponse bytes.Buffer
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		var chunk StreamGenerateResponse
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			return "", err
+		}
+		if chunk.Error != "" {
+			return "", fmt.Errorf("ollama stream error: %s", chunk.Error)
+		}
+		if chunk.Response != "" {
+			fullResponse.WriteString(chunk.Response)
+			if onChunk != nil {
+				if err := onChunk(chunk.Response); err != nil {
+					return "", err
+				}
+			}
+		}
+		if chunk.Done {
+			break
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", err
+	}
+
+	return fullResponse.String(), nil
 }
 
 ///////////////////////////////////////////////////////////

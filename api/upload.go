@@ -3,11 +3,13 @@ package api
 import (
 	"log"
 	"net/http"
+	"strings"
 
 	"gin-backend/models"
 	"gin-backend/service"
 
 	"github.com/gin-gonic/gin"
+	"golang.org/x/net/websocket"
 )
 
 func UploadHandler(c *gin.Context) {
@@ -68,4 +70,48 @@ func statusForClient(job *models.UploadJob) gin.H {
 		"error":        job.Error,
 		"metrics":      job.Metrics,
 	}
+}
+
+func UploadStatusWebSocketHandler(c *gin.Context) {
+	jobID := strings.TrimSpace(c.Param("job_id"))
+	if jobID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job_id is required"})
+		return
+	}
+
+	websocket.Handler(func(conn *websocket.Conn) {
+		defer conn.Close()
+
+		updates, unsubscribe, err := service.DefaultManager().SubscribeJob(jobID)
+		if err != nil {
+			_ = websocket.JSON.Send(conn, gin.H{
+				"type":    "error",
+				"message": "job not found",
+			})
+			return
+		}
+		defer unsubscribe()
+
+		for {
+			select {
+			case <-conn.Request().Context().Done():
+				return
+			case job, ok := <-updates:
+				if !ok {
+					return
+				}
+
+				payload := statusForClient(job)
+				payload["type"] = "status"
+				if err := websocket.JSON.Send(conn, payload); err != nil {
+					log.Printf("[upload-ws] send failed for job=%s: %v", jobID, err)
+					return
+				}
+
+				if job.Status == models.JobCompleted || job.Status == models.JobFailed {
+					return
+				}
+			}
+		}
+	}).ServeHTTP(c.Writer, c.Request)
 }
