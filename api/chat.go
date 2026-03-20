@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"gin-backend/models"
+	"gin-backend/llm"
 	"gin-backend/service"
 
 	"github.com/gin-gonic/gin"
@@ -42,14 +42,16 @@ func ChatHandler(c *gin.Context) {
 		return
 	}
 
-	ollama := models.NewOllamaClient()
 	prompt := fmt.Sprintf(
 		"You are answering questions only from the uploaded content.\n\nRetrieved context:\n%s\n\nUser question:\n%s\n\nInstructions:\n- Answer using only the retrieved context.\n- If the answer is not clearly present, say that it is not available in the uploaded content.\n- Be concise but complete.\n- When possible, quote exact values from the context.",
 		contextText,
 		req.Question,
 	)
 
-	answer, err := ollama.GenerateText(prompt)
+	client := llm.NewGroqClient()
+	answer, err := client.GenerateResponse([]llm.Message{
+		{Role: "user", Content: prompt},
+	})
 	if err != nil {
 		log.Printf("[chat] failed to generate answer: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to generate text response"})

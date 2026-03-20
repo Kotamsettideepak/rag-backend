@@ -12,12 +12,14 @@ import (
 
 	"gin-backend/db"
 	"gin-backend/embedding"
+	"gin-backend/extractor"
 	"gin-backend/models"
 	"gin-backend/worker"
 )
 
 type Manager struct {
 	parser    *Parser
+	extractor extractor.Client
 	chunker   *Chunker
 	embedder  *embedding.Service
 	store     *db.ChromaStore
@@ -43,7 +45,8 @@ func NewManager() *Manager {
 	embedder := embedding.NewService(ollamaClient, cache)
 
 	manager := &Manager{
-		parser:    NewParser(ollamaClient),
+		parser:    NewParser(),
+		extractor: extractor.NewHTTPClient(),
 		chunker:   NewChunker(getEnvInt("INGEST_CHUNK_SIZE", 3500), getEnvInt("INGEST_CHUNK_OVERLAP", 700)),
 		embedder:  embedder,
 		store:     db.NewChromaStore(),
@@ -219,9 +222,9 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	documents := make([]models.ParsedDocument, 0, len(queued.Files))
 
 	for _, file := range queued.Files {
-		document, err := m.parser.ParseFile(file)
+		document, err := m.extractor.Extract(ctx, file)
 		if err != nil {
-			m.failJob(queued.ID, fmt.Errorf("parse failed for %s: %w", file.OriginalName, err))
+			m.failJob(queued.ID, fmt.Errorf("extract failed for %s: %w", file.OriginalName, err))
 			return
 		}
 

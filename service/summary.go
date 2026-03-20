@@ -5,7 +5,7 @@ import (
 	"log"
 	"strings"
 
-	"gin-backend/models"
+	"gin-backend/llm"
 )
 
 func GenerateUploadSummary(extractedTexts []string) string {
@@ -20,8 +20,10 @@ func GenerateUploadSummary(extractedTexts []string) string {
 		preview,
 	)
 
-	client := models.NewOllamaClient()
-	summary, err := client.GenerateText(prompt)
+	client := llm.NewGroqClient()
+	summary, err := client.GenerateResponse([]llm.Message{
+		{Role: "user", Content: prompt},
+	})
 	if err != nil {
 		log.Printf("[summary] failed to generate upload summary with llm: %v", err)
 		return preview

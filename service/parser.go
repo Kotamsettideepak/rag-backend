@@ -1,7 +1,6 @@
 package service
 
 import (
-	"encoding/base64"
 	"fmt"
 	"io"
 	"log"
@@ -11,16 +10,12 @@ import (
 	"strings"
 
 	"gin-backend/models"
-
-	"github.com/ledongthuc/pdf"
 )
 
-type Parser struct {
-	ollama *models.OllamaClient
-}
+type Parser struct{}
 
-func NewParser(ollama *models.OllamaClient) *Parser {
-	return &Parser{ollama: ollama}
+func NewParser() *Parser {
+	return &Parser{}
 }
 
 func (p *Parser) StageFiles(files []*multipart.FileHeader) ([]models.StagedFile, error) {
@@ -30,6 +25,11 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader) ([]models.StagedFile,
 
 	staged := make([]models.StagedFile, 0, len(files))
 	for index, file := range files {
+		detectedKind := detectKind(file.Filename, file.Header.Get("Content-Type"))
+		if detectedKind != "pdf" {
+			return nil, fmt.Errorf("only PDF files are supported right now: %s", file.Filename)
+		}
+
 		fileID := generateID()
 		storedName := fileID + "_" + sanitizeFilename(file.Filename)
 		storedPath := filepath.Join(".", "temp", storedName)
@@ -44,27 +44,12 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader) ([]models.StagedFile,
 			StoredPath:    storedPath,
 			Size:          file.Size,
 			ContentType:   file.Header.Get("Content-Type"),
-			DetectedKind:  detectKind(file.Filename, file.Header.Get("Content-Type")),
+			DetectedKind:  detectedKind,
 			OriginalOrder: index,
 		})
 	}
 
 	return staged, nil
-}
-
-func (p *Parser) ParseFile(staged models.StagedFile) (models.ParsedDocument, error) {
-	switch staged.DetectedKind {
-	case "pdf":
-		return p.parsePDF(staged)
-	case "image":
-		return p.parseImage(staged)
-	case "audio":
-		return p.parsePlaceholder(staged, "Audio transcription placeholder for file "+staged.OriginalName+". Replace this with Whisper or another speech-to-text pipeline.")
-	case "video":
-		return p.parsePlaceholder(staged, "Video transcript placeholder for file "+staged.OriginalName+". Replace this with a video/audio extraction pipeline.")
-	default:
-		return models.ParsedDocument{}, fmt.Errorf("unsupported file type: %s", staged.OriginalName)
-	}
 }
 
 func (p *Parser) Cleanup(staged []models.StagedFile) {
@@ -73,77 +58,6 @@ func (p *Parser) Cleanup(staged []models.StagedFile) {
 			log.Printf("[parser] failed to remove staged file %s: %v", file.StoredPath, err)
 		}
 	}
-}
-
-func (p *Parser) parsePDF(staged models.StagedFile) (models.ParsedDocument, error) {
-	file, reader, err := pdf.Open(staged.StoredPath)
-	if err != nil {
-		return models.ParsedDocument{}, err
-	}
-	defer file.Close()
-
-	pageTexts := make([]string, 0, reader.NumPage())
-	fullText := strings.Builder{}
-
-	for pageNumber := 1; pageNumber <= reader.NumPage(); pageNumber++ {
-		page := reader.Page(pageNumber)
-		if page.V.IsNull() {
-			continue
-		}
-
-		pageText, _ := page.GetPlainText(nil)
-		pageText = normalizeText(pageText)
-		if pageText == "" {
-			continue
-		}
-
-		pageTexts = append(pageTexts, pageText)
-		if fullText.Len() > 0 {
-			fullText.WriteString("\n\n")
-		}
-		fullText.WriteString(pageText)
-	}
-
-	return models.ParsedDocument{
-		FileID:    staged.FileID,
-		FileName:  staged.OriginalName,
-		FileKind:  staged.DetectedKind,
-		Text:      fullText.String(),
-		PageTexts: pageTexts,
-	}, nil
-}
-
-func (p *Parser) parseImage(staged models.StagedFile) (models.ParsedDocument, error) {
-	fileData, err := os.ReadFile(staged.StoredPath)
-	if err != nil {
-		return models.ParsedDocument{}, err
-	}
-
-	imageBase64 := base64.StdEncoding.EncodeToString(fileData)
-	description, err := p.ollama.DescribeImage("Describe this image in detail.", imageBase64)
-	if err != nil {
-		return models.ParsedDocument{}, err
-	}
-
-	description = normalizeText(description)
-	return models.ParsedDocument{
-		FileID:    staged.FileID,
-		FileName:  staged.OriginalName,
-		FileKind:  staged.DetectedKind,
-		Text:      description,
-		PageTexts: []string{description},
-	}, nil
-}
-
-func (p *Parser) parsePlaceholder(staged models.StagedFile, text string) (models.ParsedDocument, error) {
-	text = normalizeText(text)
-	return models.ParsedDocument{
-		FileID:    staged.FileID,
-		FileName:  staged.OriginalName,
-		FileKind:  staged.DetectedKind,
-		Text:      text,
-		PageTexts: []string{text},
-	}, nil
 }
 
 func saveMultipartToPath(file *multipart.FileHeader, path string) error {
@@ -174,14 +88,8 @@ func detectKind(filename string, contentType string) string {
 	lowerType := strings.ToLower(contentType)
 
 	switch {
-	case strings.HasSuffix(lowerName, ".pdf"):
+	case strings.HasSuffix(lowerName, ".pdf"), strings.Contains(lowerType, "pdf"):
 		return "pdf"
-	case strings.HasPrefix(lowerType, "image/"), strings.HasSuffix(lowerName, ".png"), strings.HasSuffix(lowerName, ".jpg"), strings.HasSuffix(lowerName, ".jpeg"):
-		return "image"
-	case strings.HasPrefix(lowerType, "audio/"), strings.HasSuffix(lowerName, ".mp3"), strings.HasSuffix(lowerName, ".wav"):
-		return "audio"
-	case strings.HasPrefix(lowerType, "video/"), strings.HasSuffix(lowerName, ".mp4"), strings.HasSuffix(lowerName, ".mov"):
-		return "video"
 	default:
 		return "unknown"
 	}
