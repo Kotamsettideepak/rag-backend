@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"gin-backend/config"
 	"gin-backend/models"
@@ -23,11 +23,14 @@ type Client interface {
 
 type HTTPClient struct {
 	baseURL string
+	model   string
+	apiKey  string
 	client  *http.Client
 }
 
 type transcriptionResponse struct {
 	Text     string               `json:"text"`
+	Duration float64              `json:"duration"`
 	Segments []transcribedSegment `json:"segments"`
 }
 
@@ -39,15 +42,24 @@ type transcribedSegment struct {
 
 func NewHTTPClient() Client {
 	return &HTTPClient{
-		baseURL: config.GetAudioServiceBaseURL(),
-		client:  &http.Client{Timeout: 300 * time.Second},
+		baseURL: config.GetGroqBaseURL(),
+		model:   config.GetGroqAudioModel(),
+		apiKey:  config.GetGroqAPIKey(),
+		client:  &http.Client{Timeout: config.GetGroqTimeout()},
 	}
 }
 
 func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (models.ParsedDocument, error) {
+	if strings.TrimSpace(c.apiKey) == "" {
+		return models.ParsedDocument{}, fmt.Errorf("GROQ_API_KEY is not configured")
+	}
+
 	fileData, err := os.ReadFile(staged.StoredPath)
 	if err != nil {
 		return models.ParsedDocument{}, err
+	}
+	if len(fileData) > 25*1024*1024 {
+		return models.ParsedDocument{}, fmt.Errorf("audio file exceeds current transcription limit of 25 MB")
 	}
 
 	body := &bytes.Buffer{}
@@ -60,15 +72,34 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 	if _, err := part.Write(fileData); err != nil {
 		return models.ParsedDocument{}, err
 	}
+	if err := writer.WriteField("model", c.model); err != nil {
+		return models.ParsedDocument{}, err
+	}
+	if err := writer.WriteField("response_format", "verbose_json"); err != nil {
+		return models.ParsedDocument{}, err
+	}
+	if err := writer.WriteField("timestamp_granularities[]", "segment"); err != nil {
+		return models.ParsedDocument{}, err
+	}
 	if err := writer.Close(); err != nil {
 		return models.ParsedDocument{}, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/transcribe", body)
+	endpoint := c.baseURL + "/audio/transcriptions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return models.ParsedDocument{}, err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+
+	log.Printf(
+		"[audio] sending Groq transcription request url=%s filename=%s model=%s bytes=%d",
+		endpoint,
+		filepath.Base(staged.OriginalName),
+		c.model,
+		len(fileData),
+	)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -80,8 +111,9 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 	if err != nil {
 		return models.ParsedDocument{}, err
 	}
+	log.Printf("[audio] response status=%d file=%s body=%s", resp.StatusCode, staged.OriginalName, strings.TrimSpace(string(responseBody)))
 	if resp.StatusCode != http.StatusOK {
-		return models.ParsedDocument{}, fmt.Errorf("audio service failed with status %d: %s", resp.StatusCode, string(responseBody))
+		return models.ParsedDocument{}, fmt.Errorf("groq transcription failed with status %d: %s", resp.StatusCode, string(responseBody))
 	}
 
 	var parsed transcriptionResponse
@@ -145,6 +177,9 @@ func buildAudioMetadataBlock(staged models.StagedFile, response transcriptionRes
 }
 
 func estimateAudioDuration(response transcriptionResponse) float64 {
+	if response.Duration > 0 {
+		return response.Duration
+	}
 	var maxEnd float64
 	for _, segment := range response.Segments {
 		if segment.End > maxEnd {

@@ -26,8 +26,15 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader) ([]models.StagedFile,
 	staged := make([]models.StagedFile, 0, len(files))
 	for index, file := range files {
 		detectedKind := detectKind(file.Filename, file.Header.Get("Content-Type"))
+		log.Printf(
+			"[parser] file=%s content_type=%s detected_kind=%s size=%d",
+			file.Filename,
+			file.Header.Get("Content-Type"),
+			detectedKind,
+			file.Size,
+		)
 		if !isSupportedKind(detectedKind) {
-			return nil, fmt.Errorf("only PDF and audio files are supported right now: %s", file.Filename)
+			return nil, fmt.Errorf("only PDF, audio, and image files are supported right now: %s", file.Filename)
 		}
 
 		fileID := generateID()

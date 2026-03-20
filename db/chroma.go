@@ -40,6 +40,19 @@ type queryResponse struct {
 	Metadatas [][]map[string]interface{} `json:"metadatas"`
 }
 
+type getRequest struct {
+	Where   map[string]interface{} `json:"where,omitempty"`
+	Include []string               `json:"include,omitempty"`
+	Limit   int                    `json:"limit,omitempty"`
+	Offset  int                    `json:"offset,omitempty"`
+}
+
+type getResponse struct {
+	IDs       []string                 `json:"ids"`
+	Documents []string                 `json:"documents"`
+	Metadatas []map[string]interface{} `json:"metadatas"`
+}
+
 func NewChromaStore() *ChromaStore {
 	return &ChromaStore{
 		client: &http.Client{
@@ -151,6 +164,55 @@ func (s *ChromaStore) Search(embedding []float64, nResults int) ([]models.Search
 	return buildSearchMatches(parsed), nil
 }
 
+func (s *ChromaStore) GetByMetadata(where map[string]interface{}, limit int) ([]models.SearchMatch, error) {
+	collectionID, err := s.getCollectionID()
+	if err != nil {
+		return nil, err
+	}
+
+	req := getRequest{
+		Where:   where,
+		Include: []string{"documents", "metadatas"},
+		Limit:   limit,
+		Offset:  0,
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, err
+	}
+
+	url := fmt.Sprintf(
+		"%s/api/v2/tenants/%s/databases/%s/collections/%s/get",
+		config.GetChromaBaseURL(),
+		config.GetChromaTenant(),
+		config.GetChromaDatabase(),
+		collectionID,
+	)
+
+	resp, err := s.doRequest(http.MethodPost, url, body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("chroma get failed with status %d: %s", resp.StatusCode, string(responseBody))
+	}
+
+	var parsed getResponse
+	if err := json.Unmarshal(responseBody, &parsed); err != nil {
+		return nil, fmt.Errorf("failed to decode chroma get response: %w", err)
+	}
+
+	return buildGetMatches(parsed), nil
+}
+
 func buildSearchMatches(response queryResponse) []models.SearchMatch {
 	if len(response.Documents) == 0 {
 		return nil
@@ -175,6 +237,26 @@ func buildSearchMatches(response queryResponse) []models.SearchMatch {
 		}
 		if index < len(metadatas) {
 			match.Metadata = metadatas[index]
+		}
+		matches = append(matches, match)
+	}
+
+	return matches
+}
+
+func buildGetMatches(response getResponse) []models.SearchMatch {
+	if len(response.Documents) == 0 {
+		return nil
+	}
+
+	matches := make([]models.SearchMatch, 0, len(response.Documents))
+	for index, document := range response.Documents {
+		match := models.SearchMatch{Document: document}
+		if index < len(response.IDs) {
+			match.ID = response.IDs[index]
+		}
+		if index < len(response.Metadatas) {
+			match.Metadata = response.Metadatas[index]
 		}
 		matches = append(matches, match)
 	}

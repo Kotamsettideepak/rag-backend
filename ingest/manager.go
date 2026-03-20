@@ -182,7 +182,7 @@ func (m *Manager) SearchContext(ctx context.Context, question string) (models.Se
 		return models.SearchContextResult{}, err
 	}
 
-	return buildSearchContextResult(question, matches), nil
+	return buildSearchContextResult(question, matches, m.store), nil
 }
 
 func (m *Manager) ClearContext() error {

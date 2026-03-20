@@ -8,6 +8,7 @@ import (
 const (
 	contextModalityPDF   = "pdf"
 	contextModalityAudio = "audio"
+	contextModalityImage = "image"
 	contextModalityMixed = "mixed"
 )
 
@@ -46,6 +47,12 @@ func buildInstructionBlock(modality string) string {
 			"- Do not confuse the uploaded filename with titles, internal chapter names, print marks, or layout/source file names appearing inside the document.",
 			"- Use the document structure and headings when they help answer the question accurately.",
 		}
+	case contextModalityImage:
+		modalityRules = []string{
+			"- Answer from visible image details, generated captions, summaries, and uploaded image metadata only.",
+			"- Do not infer hidden actions, identities, brands, or scene details unless they are clearly present in the retrieved context.",
+			"- Prefer the retrieved objects, colors, caption, and summary when describing the image.",
+		}
 	default:
 		modalityRules = []string{
 			"- Prefer explicit uploaded file metadata for file identity questions.",
@@ -62,6 +69,8 @@ func normalizeModality(modality string) string {
 		return contextModalityAudio
 	case contextModalityPDF:
 		return contextModalityPDF
+	case contextModalityImage:
+		return contextModalityImage
 	default:
 		return contextModalityMixed
 	}

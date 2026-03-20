@@ -5,51 +5,88 @@ import (
 	"sort"
 	"strings"
 
+	"gin-backend/db"
 	"gin-backend/models"
 )
 
 const (
 	searchModalityPDF   = "pdf"
 	searchModalityAudio = "audio"
+	searchModalityImage = "image"
 	searchModalityMixed = "mixed"
 )
 
-func buildContextFromMatches(question string, matches []models.SearchMatch) string {
-	result := buildSearchContextResult(question, matches)
+func buildContextFromMatches(question string, matches []models.SearchMatch, store *db.ChromaStore) string {
+	result := buildSearchContextResult(question, matches, store)
 	return result.Context
 }
 
-func buildSearchContextResult(question string, matches []models.SearchMatch) models.SearchContextResult {
+func buildSearchContextResult(question string, matches []models.SearchMatch, store *db.ChromaStore) models.SearchContextResult {
 	if len(matches) == 0 {
 		return models.SearchContextResult{Context: "", Modality: searchModalityMixed}
 	}
 
 	audioMatches := filterMatchesByKind(matches, KindAudio)
-	if len(audioMatches) == 0 {
+	imageMatches := filterMatchesByKind(matches, KindImage)
+	pdfMatches := filterMatchesByKind(matches, KindPDF)
+
+	switch {
+	case len(audioMatches) > 0 && len(imageMatches) == 0 && len(pdfMatches) == 0:
+		fileScopedMatches := hydrateAudioMatches(audioMatches, store)
+		intent := classifyAudioQuery(question)
+		switch intent {
+		case audioQueryMetadata:
+			return models.SearchContextResult{
+				Context:  buildAudioMetadataContext(fileScopedMatches),
+				Modality: searchModalityAudio,
+			}
+		case audioQueryLyrics:
+			return models.SearchContextResult{
+				Context:  buildOrderedAudioTranscriptContext(fileScopedMatches),
+				Modality: searchModalityAudio,
+			}
+		default:
+			return models.SearchContextResult{
+				Context:  buildAudioSemanticContext(fileScopedMatches, matches),
+				Modality: searchModalityAudio,
+			}
+		}
+	case len(imageMatches) > 0 && len(audioMatches) == 0 && len(pdfMatches) == 0:
+		return models.SearchContextResult{
+			Context:  joinMatchDocuments(matches),
+			Modality: searchModalityImage,
+		}
+	case len(pdfMatches) > 0 && len(audioMatches) == 0 && len(imageMatches) == 0:
 		return models.SearchContextResult{
 			Context:  joinMatchDocuments(matches),
 			Modality: searchModalityPDF,
 		}
-	}
-
-	intent := classifyAudioQuery(question)
-	switch intent {
-	case audioQueryMetadata:
-		return models.SearchContextResult{
-			Context:  buildAudioMetadataContext(audioMatches),
-			Modality: searchModalityAudio,
-		}
-	case audioQueryLyrics:
-		return models.SearchContextResult{
-			Context:  buildOrderedAudioTranscriptContext(audioMatches),
-			Modality: searchModalityAudio,
-		}
 	default:
 		return models.SearchContextResult{
-			Context:  buildAudioSemanticContext(audioMatches, matches),
-			Modality: searchModalityAudio,
+			Context:  joinMatchDocuments(matches),
+			Modality: searchModalityMixed,
 		}
 	}
+}
+
+func hydrateAudioMatches(matches []models.SearchMatch, store *db.ChromaStore) []models.SearchMatch {
+	if len(matches) == 0 || store == nil {
+		return matches
+	}
+
+	fileID := metadataString(matches[0].Metadata, "file_id")
+	if fileID == "" {
+		return matches
+	}
+
+	fullMatches, err := store.GetByMetadata(map[string]interface{}{
+		"file_id": fileID,
+	}, 512)
+	if err != nil || len(fullMatches) == 0 {
+		return matches
+	}
+
+	return filterMatchesByKind(fullMatches, KindAudio)
 }
 
 type audioQueryIntent int

@@ -7,6 +7,7 @@ import (
 	"gin-backend/audio"
 	"gin-backend/extractor"
 	"gin-backend/models"
+	"gin-backend/visual"
 )
 
 type documentExtractor interface {
@@ -22,6 +23,7 @@ func NewDocumentRouter() *DocumentRouter {
 		extractors: map[string]documentExtractor{
 			KindPDF:   extractor.NewHTTPClient(),
 			KindAudio: audio.NewHTTPClient(),
+			KindImage: visual.NewHTTPClient(),
 		},
 	}
 }

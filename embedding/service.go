@@ -69,6 +69,16 @@ func buildChunkMetadata(chunk models.Chunk) map[string]interface{} {
 		"source":     "upload",
 	}
 
+	if chunk.FileKind == "image" {
+		switch {
+		case strings.HasPrefix(chunk.Text, "Uploaded Image Metadata"):
+			metadata["content_type"] = "image_metadata"
+		default:
+			metadata["content_type"] = "image_analysis"
+		}
+		return metadata
+	}
+
 	if chunk.FileKind != "audio" {
 		metadata["content_type"] = "document"
 		return metadata

@@ -5,6 +5,7 @@ import "strings"
 const (
 	KindPDF   = "pdf"
 	KindAudio = "audio"
+	KindImage = "image"
 )
 
 var supportedAudioExtensions = []string{
@@ -18,6 +19,15 @@ var supportedAudioExtensions = []string{
 	".mp4",
 }
 
+var supportedImageExtensions = []string{
+	".png",
+	".jpg",
+	".jpeg",
+	".webp",
+	".bmp",
+	".gif",
+}
+
 func detectKind(filename string, contentType string) string {
 	lowerName := strings.ToLower(strings.TrimSpace(filename))
 	lowerType := strings.ToLower(strings.TrimSpace(contentType))
@@ -27,6 +37,8 @@ func detectKind(filename string, contentType string) string {
 		return KindPDF
 	case isAudioFile(lowerName, lowerType):
 		return KindAudio
+	case isImageFile(lowerName, lowerType):
+		return KindImage
 	default:
 		return "unknown"
 	}
@@ -34,7 +46,7 @@ func detectKind(filename string, contentType string) string {
 
 func isSupportedKind(kind string) bool {
 	switch kind {
-	case KindPDF, KindAudio:
+	case KindPDF, KindAudio, KindImage:
 		return true
 	default:
 		return false
@@ -47,6 +59,20 @@ func isAudioFile(filename string, contentType string) bool {
 	}
 
 	for _, extension := range supportedAudioExtensions {
+		if strings.HasSuffix(filename, extension) {
+			return true
+		}
+	}
+
+	return false
+}
+
+func isImageFile(filename string, contentType string) bool {
+	if strings.HasPrefix(contentType, "image/") {
+		return true
+	}
+
+	for _, extension := range supportedImageExtensions {
 		if strings.HasSuffix(filename, extension) {
 			return true
 		}

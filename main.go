@@ -34,10 +34,6 @@ func main() {
 		log.Fatalf("[startup] failed to ensure extractor is running: %v", err)
 	}
 	defer config.ShutdownExtractorIfStarted()
-	if err := config.EnsureAudioServiceRunning(); err != nil {
-		log.Fatalf("[startup] failed to ensure audio service is running: %v", err)
-	}
-	defer config.ShutdownAudioServiceIfStarted()
 
 	manager := ingest.DefaultManager()
 	defer manager.Shutdown()
