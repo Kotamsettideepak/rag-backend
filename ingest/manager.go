@@ -171,13 +171,18 @@ func (m *Manager) SubscribeJob(jobID string) (<-chan *models.UploadJob, func(), 
 	return updates, unsubscribe, nil
 }
 
-func (m *Manager) SearchContext(ctx context.Context, question string) (string, error) {
+func (m *Manager) SearchContext(ctx context.Context, question string) (models.SearchContextResult, error) {
 	embeddingVector, err := m.embedder.EmbedQuery(ctx, question)
 	if err != nil {
-		return "", err
+		return models.SearchContextResult{}, err
 	}
 
-	return m.store.Search(embeddingVector, m.queryTopK)
+	matches, err := m.store.Search(embeddingVector, m.queryTopK)
+	if err != nil {
+		return models.SearchContextResult{}, err
+	}
+
+	return buildSearchContextResult(question, matches), nil
 }
 
 func (m *Manager) ClearContext() error {

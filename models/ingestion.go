@@ -2,6 +2,17 @@ package models
 
 import "time"
 
+type SearchMatch struct {
+	ID       string
+	Document string
+	Metadata map[string]interface{}
+}
+
+type SearchContextResult struct {
+	Context  string
+	Modality string
+}
+
 type UploadJobStatus string
 
 const (

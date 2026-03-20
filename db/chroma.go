@@ -35,7 +35,9 @@ type queryRequest struct {
 }
 
 type queryResponse struct {
-	Documents [][]string `json:"documents"`
+	IDs       [][]string                 `json:"ids"`
+	Documents [][]string                 `json:"documents"`
+	Metadatas [][]map[string]interface{} `json:"metadatas"`
 }
 
 func NewChromaStore() *ChromaStore {
@@ -102,10 +104,10 @@ func (s *ChromaStore) AddRecords(records []models.VectorRecord) error {
 	return nil
 }
 
-func (s *ChromaStore) Search(embedding []float64, nResults int) (string, error) {
+func (s *ChromaStore) Search(embedding []float64, nResults int) ([]models.SearchMatch, error) {
 	collectionID, err := s.getCollectionID()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	req := queryRequest{
@@ -115,7 +117,7 @@ func (s *ChromaStore) Search(embedding []float64, nResults int) (string, error) 
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	url := fmt.Sprintf(
@@ -128,32 +130,56 @@ func (s *ChromaStore) Search(embedding []float64, nResults int) (string, error) 
 
 	resp, err := s.doRequest(http.MethodPost, url, body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return "", fmt.Errorf("chroma query failed with status %d: %s", resp.StatusCode, string(responseBody))
+		return nil, fmt.Errorf("chroma query failed with status %d: %s", resp.StatusCode, string(responseBody))
 	}
 
 	var parsed queryResponse
 	if err := json.Unmarshal(responseBody, &parsed); err != nil {
-		return "", fmt.Errorf("failed to decode chroma query response: %w", err)
+		return nil, fmt.Errorf("failed to decode chroma query response: %w", err)
 	}
 
-	context := ""
-	if len(parsed.Documents) > 0 {
-		for _, doc := range parsed.Documents[0] {
-			context += doc + "\n\n"
+	return buildSearchMatches(parsed), nil
+}
+
+func buildSearchMatches(response queryResponse) []models.SearchMatch {
+	if len(response.Documents) == 0 {
+		return nil
+	}
+
+	documents := response.Documents[0]
+	var ids []string
+	if len(response.IDs) > 0 {
+		ids = response.IDs[0]
+	}
+
+	var metadatas []map[string]interface{}
+	if len(response.Metadatas) > 0 {
+		metadatas = response.Metadatas[0]
+	}
+
+	matches := make([]models.SearchMatch, 0, len(documents))
+	for index, document := range documents {
+		match := models.SearchMatch{Document: document}
+		if index < len(ids) {
+			match.ID = ids[index]
 		}
+		if index < len(metadatas) {
+			match.Metadata = metadatas[index]
+		}
+		matches = append(matches, match)
 	}
 
-	return context, nil
+	return matches
 }
 
 func (s *ChromaStore) ClearCollection() error {

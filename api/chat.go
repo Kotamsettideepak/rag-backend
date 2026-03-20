@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"strings"
@@ -35,18 +34,15 @@ func ChatHandler(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 90*time.Second)
 	defer cancel()
 
-	contextText, err := ingest.DefaultManager().SearchContext(ctx, req.Question)
+	contextResult, err := ingest.DefaultManager().SearchContext(ctx, req.Question)
 	if err != nil {
 		log.Printf("[chat] failed to search vector context: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search for context: " + err.Error()})
 		return
 	}
 
-	prompt := fmt.Sprintf(
-		"You are answering questions only from the uploaded content.\n\nRetrieved context:\n%s\n\nUser question:\n%s\n\nInstructions:\n- Answer using only the retrieved context.\n- If the answer is not clearly present, say that it is not available in the uploaded content.\n- Be concise but complete.\n- When possible, quote exact values from the context.\n- If the question asks about file name, file type, extension, or document identity, prefer explicit uploaded file metadata over text printed inside the document body.\n- Do not confuse the uploaded filename with titles, internal chapter names, print marks, or layout/source file names appearing inside the document.",
-		contextText,
-		req.Question,
-	)
+	log.Printf("[chat] context modality=%s", contextResult.Modality)
+	prompt := buildPrompt(contextResult.Modality, contextResult.Context, req.Question)
 
 	client := llm.NewGroqClient()
 	answer, err := client.GenerateResponse([]llm.Message{
