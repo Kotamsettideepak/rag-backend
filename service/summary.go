@@ -4,11 +4,13 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"gin-backend/llm"
 )
 
 func GenerateUploadSummary(extractedTexts []string) string {
+	started := time.Now()
 	joined := strings.TrimSpace(strings.Join(extractedTexts, "\n\n"))
 	if joined == "" {
 		return "Upload completed. I am ready to answer questions about the uploaded content."
@@ -34,7 +36,9 @@ func GenerateUploadSummary(extractedTexts []string) string {
 		return preview
 	}
 
-	log.Printf("[summary] upload summary generated: chars=%d", len(summary))
+	log.Printf("======== [UPLOAD SUMMARY] ============")
+	log.Printf("[summary] chars=%d duration=%s preview=%q", len(summary), time.Since(started), buildPreviewText(summary, 220))
+	log.Printf("======================================")
 	return summary
 }
 

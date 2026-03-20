@@ -2,7 +2,6 @@ package worker
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 
@@ -21,7 +20,6 @@ type BatchResult struct {
 	JobID     string
 	Records   []models.VectorRecord
 	Processed int
-	CacheHits int
 	Failed    int
 	Duration  time.Duration
 	Err       error
@@ -95,20 +93,16 @@ func (p *Pool) runWorker(workerID int) {
 			}
 		}
 
-		records, cacheHits, err := p.embedder.EmbedChunks(task.Ctx, task.Batch)
+		records, err := p.embedder.EmbedChunks(task.Ctx, task.Batch)
 		result := BatchResult{
 			JobID:     task.JobID,
 			Records:   records,
 			Processed: len(task.Batch),
-			CacheHits: cacheHits,
 			Duration:  time.Since(started),
 			Err:       err,
 		}
 		if err != nil {
 			result.Failed = len(task.Batch)
-			log.Printf("[worker] worker=%d job=%s batch_failed=%d err=%v", workerID, task.JobID, len(task.Batch), err)
-		} else {
-			log.Printf("[worker] worker=%d job=%s batch_processed=%d cache_hits=%d duration=%s", workerID, task.JobID, len(task.Batch), cacheHits, result.Duration)
 		}
 
 		task.Response <- result

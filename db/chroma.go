@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -20,6 +19,7 @@ const collectionName = "rag_collection"
 type ChromaStore struct {
 	mu               sync.Mutex
 	cachedCollection string
+	client           *http.Client
 }
 
 type addRequest struct {
@@ -39,7 +39,16 @@ type queryResponse struct {
 }
 
 func NewChromaStore() *ChromaStore {
-	return &ChromaStore{}
+	return &ChromaStore{
+		client: &http.Client{
+			Timeout: 90 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        100,
+				MaxIdleConnsPerHost: 20,
+				IdleConnTimeout:     90 * time.Second,
+			},
+		},
+	}
 }
 
 func (s *ChromaStore) AddRecords(records []models.VectorRecord) error {
@@ -79,7 +88,7 @@ func (s *ChromaStore) AddRecords(records []models.VectorRecord) error {
 		collectionID,
 	)
 
-	resp, err := doRequest(http.MethodPost, url, body, 45*time.Second)
+	resp, err := s.doRequest(http.MethodPost, url, body)
 	if err != nil {
 		return err
 	}
@@ -117,7 +126,7 @@ func (s *ChromaStore) Search(embedding []float64, nResults int) (string, error) 
 		collectionID,
 	)
 
-	resp, err := doRequest(http.MethodPost, url, body, 30*time.Second)
+	resp, err := s.doRequest(http.MethodPost, url, body)
 	if err != nil {
 		return "", err
 	}
@@ -197,7 +206,7 @@ func (s *ChromaStore) getCollectionID() (string, error) {
 		config.GetChromaDatabase(),
 	)
 
-	resp, err := doRequest(http.MethodPost, url, createPayload, 30*time.Second)
+	resp, err := s.doRequest(http.MethodPost, url, createPayload)
 	if err != nil {
 		return "", err
 	}
@@ -230,7 +239,7 @@ func (s *ChromaStore) findCollectionIDLocked() (string, error) {
 		config.GetChromaDatabase(),
 	)
 
-	resp, err := doRequest(http.MethodGet, url, nil, 20*time.Second)
+	resp, err := s.doRequest(http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
@@ -265,7 +274,7 @@ func (s *ChromaStore) findCollectionIDLocked() (string, error) {
 	return "", nil
 }
 
-func doRequest(method string, url string, body []byte, timeout time.Duration) (*http.Response, error) {
+func (s *ChromaStore) doRequest(method string, url string, body []byte) (*http.Response, error) {
 	var reader io.Reader
 	if body != nil {
 		reader = bytes.NewBuffer(body)
@@ -281,10 +290,8 @@ func doRequest(method string, url string, body []byte, timeout time.Duration) (*
 		req.Header.Set("x-chroma-token", apiKey)
 	}
 
-	client := &http.Client{Timeout: timeout}
-	resp, err := client.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
-		log.Printf("[db] request failed: method=%s url=%s err=%v", method, url, err)
 		return nil, err
 	}
 
@@ -304,7 +311,7 @@ func (s *ChromaStore) deleteCollectionLocked(collectionID string) error {
 			target,
 		)
 
-		resp, err := doRequest(http.MethodDelete, url, nil, 30*time.Second)
+		resp, err := s.doRequest(http.MethodDelete, url, nil)
 		if err != nil {
 			lastErr = err
 			continue

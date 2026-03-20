@@ -18,20 +18,21 @@ import (
 )
 
 type Manager struct {
-	parser    *Parser
-	extractor extractor.Client
-	chunker   *Chunker
-	embedder  *embedding.Service
-	store     *db.ChromaStore
-	pool      *worker.Pool
-	jobQueue  chan queuedJob
-	jobs      map[string]*models.UploadJob
-	jobSubs   map[string]map[string]chan *models.UploadJob
-	mu        sync.RWMutex
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	batchSize int
-	queryTopK int
+	parser         *Parser
+	extractor      extractor.Client
+	chunker        *Chunker
+	embedder       *embedding.Service
+	store          *db.ChromaStore
+	pool           *worker.Pool
+	jobQueue       chan queuedJob
+	jobs           map[string]*models.UploadJob
+	jobSubs        map[string]map[string]chan *models.UploadJob
+	mu             sync.RWMutex
+	cancel         context.CancelFunc
+	wg             sync.WaitGroup
+	batchSize      int
+	storeBatchSize int
+	queryTopK      int
 }
 
 type queuedJob struct {
@@ -41,19 +42,19 @@ type queuedJob struct {
 
 func NewManager() *Manager {
 	ollamaClient := models.NewOllamaClient()
-	cache := embedding.NewCache()
-	embedder := embedding.NewService(ollamaClient, cache)
+	embedder := embedding.NewService(ollamaClient)
 
 	manager := &Manager{
-		parser:    NewParser(),
-		extractor: extractor.NewHTTPClient(),
-		chunker:   NewChunker(getEnvInt("INGEST_CHUNK_SIZE", 3500), getEnvInt("INGEST_CHUNK_OVERLAP", 700)),
-		embedder:  embedder,
-		store:     db.NewChromaStore(),
-		jobs:      make(map[string]*models.UploadJob),
-		jobSubs:   make(map[string]map[string]chan *models.UploadJob),
-		batchSize: getEnvInt("INGEST_BATCH_SIZE", 8),
-		queryTopK: getEnvInt("QUERY_TOP_K", 4),
+		parser:         NewParser(),
+		extractor:      extractor.NewHTTPClient(),
+		chunker:        NewChunker(getEnvInt("INGEST_CHUNK_SIZE", 3500), getEnvInt("INGEST_CHUNK_OVERLAP", 700)),
+		embedder:       embedder,
+		store:          db.NewChromaStore(),
+		jobs:           make(map[string]*models.UploadJob),
+		jobSubs:        make(map[string]map[string]chan *models.UploadJob),
+		batchSize:      getEnvInt("INGEST_BATCH_SIZE", 8),
+		storeBatchSize: getEnvInt("STORE_BATCH_SIZE", 64),
+		queryTopK:      getEnvInt("QUERY_TOP_K", 4),
 	}
 
 	workerCount := getEnvInt("INGEST_WORKERS", 8)
@@ -195,7 +196,6 @@ func (m *Manager) runJobWorker(ctx context.Context, workerID int) {
 			if !ok {
 				return
 			}
-			log.Printf("[ingest] job worker=%d picked job=%s file_count=%d", workerID, queued.ID, len(queued.Files))
 			m.processJob(ctx, queued)
 		}
 	}
@@ -282,6 +282,8 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 
 	var embeddingDuration time.Duration
 	var storageDuration time.Duration
+	pendingRecords := make([]models.VectorRecord, 0, minInt(len(allChunks), m.storeBatchSize))
+	pendingProcessed := 0
 	for range batches {
 		result := <-resultChannel
 		embeddingDuration += result.Duration
@@ -291,15 +293,39 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 			return
 		}
 
+		pendingRecords = append(pendingRecords, result.Records...)
+		pendingProcessed += result.Processed
+
+		if len(pendingRecords) >= m.storeBatchSize {
+			storeStart := time.Now()
+			if err := m.store.AddRecords(pendingRecords); err != nil {
+				m.failJob(queued.ID, fmt.Errorf("vector store failed: %w", err))
+				return
+			}
+			storageDuration += time.Since(storeStart)
+
+			m.updateJob(queued.ID, func(target *models.UploadJob) {
+				target.CompletedChunks += pendingProcessed
+				target.UpdatedAt = time.Now().UTC()
+				target.Metrics.EmbeddingDurationMs = embeddingDuration.Milliseconds()
+				target.Metrics.StorageDurationMs = storageDuration.Milliseconds()
+			})
+
+			pendingRecords = pendingRecords[:0]
+			pendingProcessed = 0
+		}
+	}
+
+	if len(pendingRecords) > 0 {
 		storeStart := time.Now()
-		if err := m.store.AddRecords(result.Records); err != nil {
+		if err := m.store.AddRecords(pendingRecords); err != nil {
 			m.failJob(queued.ID, fmt.Errorf("vector store failed: %w", err))
 			return
 		}
 		storageDuration += time.Since(storeStart)
 
 		m.updateJob(queued.ID, func(target *models.UploadJob) {
-			target.CompletedChunks += result.Processed
+			target.CompletedChunks += pendingProcessed
 			target.UpdatedAt = time.Now().UTC()
 			target.Metrics.EmbeddingDurationMs = embeddingDuration.Milliseconds()
 			target.Metrics.StorageDurationMs = storageDuration.Milliseconds()
@@ -332,18 +358,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		}
 	})
 
-	log.Printf(
-		"[ingest] job=%s completed files=%d chunks=%d total=%s parse=%s chunk=%s embed=%s store=%s throughput=%.2f chunks/sec",
-		queued.ID,
-		len(queued.Files),
-		len(allChunks),
-		totalDuration,
-		parseDuration,
-		chunkDuration,
-		embeddingDuration,
-		storageDuration,
-		throughput,
-	)
+	log.Printf("[ingest] job=%s completed files=%d chunks=%d total=%s parse=%s chunk=%s embed=%s store=%s throughput=%.2f chunks/sec", queued.ID, len(queued.Files), len(allChunks), totalDuration, parseDuration, chunkDuration, embeddingDuration, storageDuration, throughput)
 }
 
 func (m *Manager) failJob(jobID string, err error) {
@@ -467,4 +482,11 @@ func getEnvInt(key string, fallback int) int {
 	}
 
 	return value
+}
+
+func minInt(left int, right int) int {
+	if left < right {
+		return left
+	}
+	return right
 }

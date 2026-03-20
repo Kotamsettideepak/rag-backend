@@ -3,7 +3,6 @@ package embedding
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strconv"
 	"time"
@@ -13,31 +12,25 @@ import (
 
 type Service struct {
 	client       *models.OllamaClient
-	cache        *Cache
 	maxRetries   int
 	retryBackoff time.Duration
 }
 
-func NewService(client *models.OllamaClient, cache *Cache) *Service {
+func NewService(client *models.OllamaClient) *Service {
 	return &Service{
 		client:       client,
-		cache:        cache,
 		maxRetries:   getEnvInt("EMBED_MAX_RETRIES", 3),
 		retryBackoff: time.Duration(getEnvInt("EMBED_RETRY_BACKOFF_MS", 400)) * time.Millisecond,
 	}
 }
 
-func (s *Service) EmbedChunks(ctx context.Context, chunks []models.Chunk) ([]models.VectorRecord, int, error) {
+func (s *Service) EmbedChunks(ctx context.Context, chunks []models.Chunk) ([]models.VectorRecord, error) {
 	records := make([]models.VectorRecord, 0, len(chunks))
-	cacheHits := 0
 
 	for _, chunk := range chunks {
-		embedding, fromCache, err := s.embedWithRetry(ctx, chunk.Hash, chunk.Text)
+		embedding, err := s.embedWithRetry(ctx, chunk.Text)
 		if err != nil {
-			return nil, cacheHits, err
-		}
-		if fromCache {
-			cacheHits++
+			return nil, err
 		}
 
 		records = append(records, models.VectorRecord{
@@ -56,32 +49,22 @@ func (s *Service) EmbedChunks(ctx context.Context, chunks []models.Chunk) ([]mod
 		})
 	}
 
-	return records, cacheHits, nil
+	return records, nil
 }
 
 func (s *Service) EmbedQuery(ctx context.Context, text string) ([]float64, error) {
 	return s.client.GenerateEmbeddingWithContext(ctx, text)
 }
 
-func (s *Service) embedWithRetry(ctx context.Context, hash string, text string) ([]float64, bool, error) {
-	if hash != "" {
-		if cached, ok := s.cache.Get(hash); ok {
-			return cached, true, nil
-		}
-	}
-
+func (s *Service) embedWithRetry(ctx context.Context, text string) ([]float64, error) {
 	var lastErr error
 	for attempt := 1; attempt <= s.maxRetries; attempt++ {
 		embedding, err := s.client.GenerateEmbeddingWithContext(ctx, text)
 		if err == nil {
-			if hash != "" {
-				s.cache.Set(hash, embedding)
-			}
-			return embedding, false, nil
+			return embedding, nil
 		}
 
 		lastErr = err
-		log.Printf("[embedding] attempt %d/%d failed: %v", attempt, s.maxRetries, err)
 
 		if attempt == s.maxRetries {
 			break
@@ -89,12 +72,12 @@ func (s *Service) embedWithRetry(ctx context.Context, hash string, text string) 
 
 		select {
 		case <-ctx.Done():
-			return nil, false, ctx.Err()
+			return nil, ctx.Err()
 		case <-time.After(s.retryBackoff * time.Duration(attempt)):
 		}
 	}
 
-	return nil, false, fmt.Errorf("embedding failed after %d attempts: %w", s.maxRetries, lastErr)
+	return nil, fmt.Errorf("embedding failed after %d attempts: %w", s.maxRetries, lastErr)
 }
 
 func getEnvInt(key string, fallback int) int {

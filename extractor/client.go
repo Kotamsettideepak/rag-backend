@@ -56,8 +56,14 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 	if err := writer.WriteField("file_kind", staged.DetectedKind); err != nil {
 		return models.ParsedDocument{}, err
 	}
+	if err := writer.WriteField("original_name", staged.OriginalName); err != nil {
+		return models.ParsedDocument{}, err
+	}
+	if err := writer.WriteField("content_type", staged.ContentType); err != nil {
+		return models.ParsedDocument{}, err
+	}
 
-	part, err := writer.CreateFormFile("file", filepath.Base(staged.StoredPath))
+	part, err := writer.CreateFormFile("file", filepath.Base(staged.OriginalName))
 	if err != nil {
 		return models.ParsedDocument{}, err
 	}
@@ -97,12 +103,28 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		FileID:    staged.FileID,
 		FileName:  staged.OriginalName,
 		FileKind:  staged.DetectedKind,
-		Text:      joinElements(parsed.Elements),
-		PageTexts: groupPageTexts(parsed.Elements),
+		Text:      buildDocumentText(staged, parsed.Elements),
+		PageTexts: buildPageTexts(staged, parsed.Elements),
 	}, nil
 }
 
-func joinElements(elements []documentElement) string {
+func buildDocumentText(staged models.StagedFile, elements []documentElement) string {
+	parts := []string{buildFileMetadataBlock(staged)}
+	parts = append(parts, collectElementText(elements)...)
+	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func buildPageTexts(staged models.StagedFile, elements []documentElement) []string {
+	pages := groupPageTexts(elements)
+	if len(pages) == 0 {
+		return []string{buildFileMetadataBlock(staged)}
+	}
+
+	pages[0] = strings.TrimSpace(buildFileMetadataBlock(staged) + "\n\n" + pages[0])
+	return pages
+}
+
+func collectElementText(elements []documentElement) []string {
 	parts := make([]string, 0, len(elements))
 	for _, element := range elements {
 		content := strings.TrimSpace(element.Content)
@@ -110,7 +132,16 @@ func joinElements(elements []documentElement) string {
 			parts = append(parts, content)
 		}
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+	return parts
+}
+
+func buildFileMetadataBlock(staged models.StagedFile) string {
+	return strings.TrimSpace(strings.Join([]string{
+		"Uploaded File Metadata",
+		"Actual uploaded filename: " + strings.TrimSpace(staged.OriginalName),
+		"Detected file type: " + strings.ToUpper(strings.TrimSpace(staged.DetectedKind)),
+		"Content-Type: " + strings.TrimSpace(staged.ContentType),
+	}, "\n"))
 }
 
 func groupPageTexts(elements []documentElement) []string {

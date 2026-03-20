@@ -43,7 +43,7 @@ func ChatHandler(c *gin.Context) {
 	}
 
 	prompt := fmt.Sprintf(
-		"You are answering questions only from the uploaded content.\n\nRetrieved context:\n%s\n\nUser question:\n%s\n\nInstructions:\n- Answer using only the retrieved context.\n- If the answer is not clearly present, say that it is not available in the uploaded content.\n- Be concise but complete.\n- When possible, quote exact values from the context.",
+		"You are answering questions only from the uploaded content.\n\nRetrieved context:\n%s\n\nUser question:\n%s\n\nInstructions:\n- Answer using only the retrieved context.\n- If the answer is not clearly present, say that it is not available in the uploaded content.\n- Be concise but complete.\n- When possible, quote exact values from the context.\n- If the question asks about file name, file type, extension, or document identity, prefer explicit uploaded file metadata over text printed inside the document body.\n- Do not confuse the uploaded filename with titles, internal chapter names, print marks, or layout/source file names appearing inside the document.",
 		contextText,
 		req.Question,
 	)
