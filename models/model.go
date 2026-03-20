@@ -14,7 +14,7 @@ import (
 const (
 	OLLAMA_BASE_URL = "http://127.0.0.1:11434"
 	MODEL_EMBEDDING = "nomic-embed-text:latest"
-	EMBED_API       = "/api/embeddings"
+	EMBED_API       = "/api/embed"
 )
 
 type EmbeddingRequest struct {
@@ -22,8 +22,17 @@ type EmbeddingRequest struct {
 	Prompt string `json:"prompt"`
 }
 
+type BatchEmbeddingRequest struct {
+	Model string   `json:"model"`
+	Input []string `json:"input"`
+}
+
 type EmbeddingResponse struct {
 	Embedding []float64 `json:"embedding"`
+}
+
+type BatchEmbeddingResponse struct {
+	Embeddings [][]float64 `json:"embeddings"`
 }
 
 type OllamaClient struct {
@@ -85,9 +94,26 @@ func (o *OllamaClient) GenerateEmbedding(text string) ([]float64, error) {
 }
 
 func (o *OllamaClient) GenerateEmbeddingWithContext(ctx context.Context, text string) ([]float64, error) {
-	req := EmbeddingRequest{
-		Model:  MODEL_EMBEDDING,
-		Prompt: text,
+	embeddings, err := o.GenerateEmbeddingsWithContext(ctx, []string{text})
+	if err != nil {
+		return nil, err
+	}
+
+	if len(embeddings) != 1 {
+		return nil, fmt.Errorf("ollama returned %d embeddings for a single input", len(embeddings))
+	}
+
+	return embeddings[0], nil
+}
+
+func (o *OllamaClient) GenerateEmbeddingsWithContext(ctx context.Context, texts []string) ([][]float64, error) {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+
+	req := BatchEmbeddingRequest{
+		Model: MODEL_EMBEDDING,
+		Input: texts,
 	}
 
 	body, err := o.postWithContext(ctx, EMBED_API, req)
@@ -95,10 +121,14 @@ func (o *OllamaClient) GenerateEmbeddingWithContext(ctx context.Context, text st
 		return nil, err
 	}
 
-	var res EmbeddingResponse
+	var res BatchEmbeddingResponse
 	if err := json.Unmarshal(body, &res); err != nil {
 		return nil, err
 	}
 
-	return res.Embedding, nil
+	if len(res.Embeddings) != len(texts) {
+		return nil, fmt.Errorf("ollama returned %d embeddings for %d inputs", len(res.Embeddings), len(texts))
+	}
+
+	return res.Embeddings, nil
 }

@@ -17,7 +17,15 @@ func UploadHandler(c *gin.Context) {
 
 	form, err := c.MultipartForm()
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "files are required"})
+		lowerErr := strings.ToLower(err.Error())
+		if strings.Contains(lowerErr, "too large") || strings.Contains(lowerErr, "request body too large") {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{
+				"error": "upload is too large; increase MAX_UPLOAD_SIZE_MB or upload a smaller file",
+			})
+			return
+		}
+
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse uploaded files"})
 		return
 	}
 

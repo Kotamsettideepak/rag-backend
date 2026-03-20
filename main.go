@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -38,6 +39,7 @@ func main() {
 	defer manager.Shutdown()
 
 	router := gin.Default()
+	router.MaxMultipartMemory = getEnvBytes("MAX_UPLOAD_SIZE_MB", 128)
 	router.Use(corsMiddleware())
 
 	log.Printf("[startup] registering routes")
@@ -84,4 +86,18 @@ func waitForShutdown(server *http.Server) {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Printf("[shutdown] graceful server shutdown failed: %v", err)
 	}
+}
+
+func getEnvBytes(key string, fallbackMB int64) int64 {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return fallbackMB << 20
+	}
+
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return fallbackMB << 20
+	}
+
+	return value << 20
 }

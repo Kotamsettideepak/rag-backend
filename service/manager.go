@@ -238,11 +238,9 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 
 	chunkStart := time.Now()
 	allChunks := make([]models.Chunk, 0)
-	summaries := make([]string, 0, len(documents))
 	for _, document := range documents {
 		chunks := m.chunker.ChunkDocument(document)
 		allChunks = append(allChunks, chunks...)
-		summaries = append(summaries, document.Text)
 
 		m.updateFile(queued.ID, document.FileID, func(result *models.FileResult) {
 			result.Status = "chunked"
@@ -338,13 +336,12 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		throughput = throughput / totalDuration.Seconds()
 	}
 
-	summary := GenerateUploadSummary(summaries)
 	completedAt := time.Now().UTC()
 	m.updateJob(queued.ID, func(target *models.UploadJob) {
 		target.Status = models.JobCompleted
 		target.CompletedAt = &completedAt
 		target.UpdatedAt = completedAt
-		target.Summary = summary
+		target.Summary = "Upload completed. The files are ready for chat."
 		target.Metrics.ParseDurationMs = parseDuration.Milliseconds()
 		target.Metrics.ChunkDurationMs = chunkDuration.Milliseconds()
 		target.Metrics.EmbeddingDurationMs = embeddingDuration.Milliseconds()

@@ -25,13 +25,26 @@ func NewService(client *models.OllamaClient) *Service {
 }
 
 func (s *Service) EmbedChunks(ctx context.Context, chunks []models.Chunk) ([]models.VectorRecord, error) {
-	records := make([]models.VectorRecord, 0, len(chunks))
+	if len(chunks) == 0 {
+		return nil, nil
+	}
 
+	inputs := make([]string, 0, len(chunks))
 	for _, chunk := range chunks {
-		embedding, err := s.embedWithRetry(ctx, chunk.Text)
-		if err != nil {
-			return nil, err
-		}
+		inputs = append(inputs, chunk.Text)
+	}
+
+	embeddings, err := s.embedBatchWithRetry(ctx, inputs)
+	if err != nil {
+		return nil, err
+	}
+	if len(embeddings) != len(chunks) {
+		return nil, fmt.Errorf("embedding count mismatch: got %d embeddings for %d chunks", len(embeddings), len(chunks))
+	}
+
+	records := make([]models.VectorRecord, 0, len(chunks))
+	for index, chunk := range chunks {
+		embedding := embeddings[index]
 
 		records = append(records, models.VectorRecord{
 			ID:        chunk.ID,
@@ -56,12 +69,12 @@ func (s *Service) EmbedQuery(ctx context.Context, text string) ([]float64, error
 	return s.client.GenerateEmbeddingWithContext(ctx, text)
 }
 
-func (s *Service) embedWithRetry(ctx context.Context, text string) ([]float64, error) {
+func (s *Service) embedBatchWithRetry(ctx context.Context, texts []string) ([][]float64, error) {
 	var lastErr error
 	for attempt := 1; attempt <= s.maxRetries; attempt++ {
-		embedding, err := s.client.GenerateEmbeddingWithContext(ctx, text)
+		embeddings, err := s.client.GenerateEmbeddingsWithContext(ctx, texts)
 		if err == nil {
-			return embedding, nil
+			return embeddings, nil
 		}
 
 		lastErr = err
@@ -77,7 +90,7 @@ func (s *Service) embedWithRetry(ctx context.Context, text string) ([]float64, e
 		}
 	}
 
-	return nil, fmt.Errorf("embedding failed after %d attempts: %w", s.maxRetries, lastErr)
+	return nil, fmt.Errorf("batch embedding failed after %d attempts: %w", s.maxRetries, lastErr)
 }
 
 func getEnvInt(key string, fallback int) int {

@@ -28,9 +28,10 @@ type HTTPClient struct {
 }
 
 type documentElement struct {
-	Type    string `json:"type"`
-	Content string `json:"content"`
-	Page    int    `json:"page"`
+	Type      string `json:"type"`
+	Content   string `json:"content"`
+	Page      int    `json:"page"`
+	Indexable bool   `json:"indexable"`
 }
 
 type extractResponse struct {
@@ -127,6 +128,9 @@ func buildPageTexts(staged models.StagedFile, elements []documentElement) []stri
 func collectElementText(elements []documentElement) []string {
 	parts := make([]string, 0, len(elements))
 	for _, element := range elements {
+		if !element.Indexable {
+			continue
+		}
 		content := strings.TrimSpace(element.Content)
 		if content != "" {
 			parts = append(parts, content)
@@ -152,6 +156,9 @@ func groupPageTexts(elements []documentElement) []string {
 	pageMap := make(map[int][]string)
 	maxPage := 0
 	for _, element := range elements {
+		if !element.Indexable {
+			continue
+		}
 		content := strings.TrimSpace(element.Content)
 		if content == "" {
 			continue
