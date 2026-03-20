@@ -4,7 +4,7 @@ import (
 	"log"
 	"net/http"
 
-	"gin-backend/service"
+	"gin-backend/ingest"
 
 	"github.com/gin-gonic/gin"
 )
@@ -12,7 +12,7 @@ import (
 func ClearContextHandler(c *gin.Context) {
 	log.Printf("[context] clear request received: method=%s path=%s", c.Request.Method, c.Request.URL.Path)
 
-	err := service.DefaultManager().ClearContext()
+	err := ingest.DefaultManager().ClearContext()
 	if err != nil {
 		log.Printf("[context] clear request failed: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear saved context: " + err.Error()})

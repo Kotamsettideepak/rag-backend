@@ -1,4 +1,4 @@
-package service
+package ingest
 
 import "github.com/google/uuid"
 

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"gin-backend/ingest"
 	"gin-backend/llm"
-	"gin-backend/service"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/websocket"
@@ -69,7 +69,7 @@ func streamChatResponse(conn *websocket.Conn, question string) error {
 	ctx, cancel := context.WithTimeout(conn.Request().Context(), 90*time.Second)
 	defer cancel()
 
-	contextText, err := service.DefaultManager().SearchContext(ctx, question)
+	contextText, err := ingest.DefaultManager().SearchContext(ctx, question)
 	if err != nil {
 		return fmt.Errorf("failed to search for context: %w", err)
 	}

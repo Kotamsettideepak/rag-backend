@@ -1,4 +1,4 @@
-package service
+package ingest
 
 import (
 	"fmt"
@@ -26,8 +26,8 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader) ([]models.StagedFile,
 	staged := make([]models.StagedFile, 0, len(files))
 	for index, file := range files {
 		detectedKind := detectKind(file.Filename, file.Header.Get("Content-Type"))
-		if detectedKind != "pdf" {
-			return nil, fmt.Errorf("only PDF files are supported right now: %s", file.Filename)
+		if !isSupportedKind(detectedKind) {
+			return nil, fmt.Errorf("only PDF and audio files are supported right now: %s", file.Filename)
 		}
 
 		fileID := generateID()
@@ -81,16 +81,4 @@ func sanitizeFilename(name string) string {
 	name = filepath.Base(name)
 	name = strings.ReplaceAll(name, " ", "_")
 	return name
-}
-
-func detectKind(filename string, contentType string) string {
-	lowerName := strings.ToLower(filename)
-	lowerType := strings.ToLower(contentType)
-
-	switch {
-	case strings.HasSuffix(lowerName, ".pdf"), strings.Contains(lowerType, "pdf"):
-		return "pdf"
-	default:
-		return "unknown"
-	}
 }

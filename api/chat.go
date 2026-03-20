@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"gin-backend/ingest"
 	"gin-backend/llm"
-	"gin-backend/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -35,7 +35,7 @@ func ChatHandler(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 90*time.Second)
 	defer cancel()
 
-	contextText, err := service.DefaultManager().SearchContext(ctx, req.Question)
+	contextText, err := ingest.DefaultManager().SearchContext(ctx, req.Question)
 	if err != nil {
 		log.Printf("[chat] failed to search vector context: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search for context: " + err.Error()})

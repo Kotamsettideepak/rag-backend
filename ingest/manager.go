@@ -1,4 +1,4 @@
-package service
+package ingest
 
 import (
 	"context"
@@ -12,14 +12,13 @@ import (
 
 	"gin-backend/db"
 	"gin-backend/embedding"
-	"gin-backend/extractor"
 	"gin-backend/models"
 	"gin-backend/worker"
 )
 
 type Manager struct {
 	parser         *Parser
-	extractor      extractor.Client
+	router         *DocumentRouter
 	chunker        *Chunker
 	embedder       *embedding.Service
 	store          *db.ChromaStore
@@ -46,7 +45,7 @@ func NewManager() *Manager {
 
 	manager := &Manager{
 		parser:         NewParser(),
-		extractor:      extractor.NewHTTPClient(),
+		router:         NewDocumentRouter(),
 		chunker:        NewChunker(getEnvInt("INGEST_CHUNK_SIZE", 3500), getEnvInt("INGEST_CHUNK_OVERLAP", 700)),
 		embedder:       embedder,
 		store:          db.NewChromaStore(),
@@ -54,7 +53,7 @@ func NewManager() *Manager {
 		jobSubs:        make(map[string]map[string]chan *models.UploadJob),
 		batchSize:      getEnvInt("INGEST_BATCH_SIZE", 8),
 		storeBatchSize: getEnvInt("STORE_BATCH_SIZE", 64),
-		queryTopK:      getEnvInt("QUERY_TOP_K", 4),
+		queryTopK:      getEnvInt("QUERY_TOP_K", 10),
 	}
 
 	workerCount := getEnvInt("INGEST_WORKERS", 8)
@@ -222,7 +221,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	documents := make([]models.ParsedDocument, 0, len(queued.Files))
 
 	for _, file := range queued.Files {
-		document, err := m.extractor.Extract(ctx, file)
+		document, err := m.router.Extract(ctx, file)
 		if err != nil {
 			m.failJob(queued.ID, fmt.Errorf("extract failed for %s: %w", file.OriginalName, err))
 			return

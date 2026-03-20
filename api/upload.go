@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"strings"
 
+	"gin-backend/ingest"
 	"gin-backend/models"
-	"gin-backend/service"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/websocket"
@@ -35,7 +35,7 @@ func UploadHandler(c *gin.Context) {
 		return
 	}
 
-	job, err := service.DefaultManager().SubmitUpload(files)
+	job, err := ingest.DefaultManager().SubmitUpload(files)
 	if err != nil {
 		log.Printf("[upload] failed to enqueue ingestion job: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -55,7 +55,7 @@ func UploadHandler(c *gin.Context) {
 
 func StatusHandler(c *gin.Context) {
 	jobID := c.Param("job_id")
-	job, ok := service.DefaultManager().GetJob(jobID)
+	job, ok := ingest.DefaultManager().GetJob(jobID)
 	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 		return
@@ -90,7 +90,7 @@ func UploadStatusWebSocketHandler(c *gin.Context) {
 	websocket.Handler(func(conn *websocket.Conn) {
 		defer conn.Close()
 
-		updates, unsubscribe, err := service.DefaultManager().SubscribeJob(jobID)
+		updates, unsubscribe, err := ingest.DefaultManager().SubscribeJob(jobID)
 		if err != nil {
 			_ = websocket.JSON.Send(conn, gin.H{
 				"type":    "error",
