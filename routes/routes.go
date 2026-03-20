@@ -23,6 +23,7 @@ func RegisterRoutes(r *gin.Engine) {
 	r.GET("/status/:job_id", api.StatusHandler)
 	r.GET("/ws/status/:job_id", api.UploadStatusWebSocketHandler)
 	r.POST("/chat", api.ChatHandler)
+	r.POST("/voice/chat", api.VoiceChatHandler)
 	r.GET("/ws", api.ChatWebSocketHandler)
 	r.DELETE("/context", api.ClearContextHandler)
 }
