@@ -69,6 +69,10 @@ func buildChunkMetadata(chunk models.Chunk) map[string]interface{} {
 		"source":     "upload",
 	}
 
+	for key, value := range chunk.Metadata {
+		metadata[key] = value
+	}
+
 	if chunk.FileKind == "image" {
 		switch {
 		case strings.HasPrefix(chunk.Text, "Uploaded Image Metadata"):
@@ -80,7 +84,9 @@ func buildChunkMetadata(chunk models.Chunk) map[string]interface{} {
 	}
 
 	if chunk.FileKind != "audio" {
-		metadata["content_type"] = "document"
+		if _, exists := metadata["content_type"]; !exists {
+			metadata["content_type"] = "document"
+		}
 		return metadata
 	}
 
@@ -89,6 +95,10 @@ func buildChunkMetadata(chunk models.Chunk) map[string]interface{} {
 		if duration, ok := parseEstimatedDuration(chunk.Text); ok {
 			metadata["estimated_duration_sec"] = duration
 		}
+		return metadata
+	}
+
+	if _, exists := metadata["content_type"]; exists {
 		return metadata
 	}
 

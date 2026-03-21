@@ -70,11 +70,12 @@ type UploadJob struct {
 }
 
 type ParsedDocument struct {
-	FileID    string
-	FileName  string
-	FileKind  string
-	Text      string
-	PageTexts []string
+	FileID      string
+	FileName    string
+	FileKind    string
+	Text        string
+	PageTexts   []string
+	AudioChunks []AudioTranscriptChunk
 }
 
 type Chunk struct {
@@ -86,6 +87,14 @@ type Chunk struct {
 	Index    int
 	Text     string
 	Hash     string
+	Metadata map[string]interface{}
+}
+
+type AudioTranscriptChunk struct {
+	Content string
+	Start   float64
+	End     float64
+	Type    string
 }
 
 type ChunkResult struct {

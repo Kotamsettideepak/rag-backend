@@ -33,6 +33,65 @@ func (c *Chunker) ChunkDocument(doc models.ParsedDocument) []models.Chunk {
 	var chunks []models.Chunk
 	index := 0
 
+	if doc.FileKind == "audio" && len(doc.AudioChunks) > 0 {
+		if len(doc.PageTexts) > 0 {
+			metadataText := strings.TrimSpace(doc.PageTexts[0])
+			if metadataText != "" {
+				hashBytes := sha256.Sum256([]byte(metadataText))
+				chunks = append(chunks, models.Chunk{
+					ID:       doc.FileID + "-" + hashBytesToShort(hashBytes[:]) + "-" + itoa(index),
+					FileID:   doc.FileID,
+					FileName: doc.FileName,
+					FileKind: doc.FileKind,
+					Page:     1,
+					Index:    index,
+					Text:     metadataText,
+					Hash:     hex.EncodeToString(hashBytes[:]),
+				})
+				index++
+			}
+		}
+
+		for _, audioChunk := range doc.AudioChunks {
+			chunkText := formatAudioChunkText(audioChunk)
+			if chunkText == "" {
+				continue
+			}
+
+			hashBytes := sha256.Sum256([]byte(chunkText))
+			chunks = append(chunks, models.Chunk{
+				ID:       doc.FileID + "-" + hashBytesToShort(hashBytes[:]) + "-" + itoa(index),
+				FileID:   doc.FileID,
+				FileName: doc.FileName,
+				FileKind: doc.FileKind,
+				Page:     index + 2,
+				Index:    index,
+				Text:     chunkText,
+				Hash:     hex.EncodeToString(hashBytes[:]),
+				Metadata: map[string]interface{}{
+					"content_type":  audioChunk.Type,
+					"segment_start": audioChunk.Start,
+					"segment_end":   audioChunk.End,
+				},
+			})
+			index++
+		}
+
+		if len(chunks) > 0 {
+			log.Printf(
+				"[chunker] file=%s kind=%s pages=%d produced_chunks=%d target_size=%d overlap=%d first_chunk_preview=%s",
+				doc.FileName,
+				doc.FileKind,
+				len(doc.PageTexts),
+				len(chunks),
+				c.TargetSize,
+				c.OverlapSize,
+				firstChunkPreview(chunks),
+			)
+			return chunks
+		}
+	}
+
 	for pageIndex, pageText := range doc.PageTexts {
 		pageChunks := c.chunkText(pageText)
 		for _, chunkText := range pageChunks {
@@ -206,4 +265,12 @@ func firstChunkPreview(chunks []models.Chunk) string {
 		return text
 	}
 	return text[:180] + "..."
+}
+
+func formatAudioChunkText(chunk models.AudioTranscriptChunk) string {
+	text := strings.Join(strings.Fields(strings.TrimSpace(chunk.Content)), " ")
+	if text == "" {
+		return ""
+	}
+	return "[" + strconv.FormatFloat(chunk.Start, 'f', 2, 64) + " - " + strconv.FormatFloat(chunk.End, 'f', 2, 64) + "] " + text
 }
