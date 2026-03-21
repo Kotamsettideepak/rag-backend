@@ -12,8 +12,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"gin-backend/config"
 	"gin-backend/models"
@@ -33,10 +36,14 @@ type Client interface {
 }
 
 type HTTPClient struct {
-	baseURL string
-	model   string
-	apiKey  string
-	client  *http.Client
+	baseURL         string
+	model           string
+	apiKey          string
+	client          *http.Client
+	requestInterval time.Duration
+	maxRetries      int
+	rateMu          sync.Mutex
+	nextRequestAt   time.Time
 }
 
 type transcriptionResponse struct {
@@ -58,10 +65,12 @@ type audioWindow struct {
 
 func NewHTTPClient() Client {
 	return &HTTPClient{
-		baseURL: config.GetGroqBaseURL(),
-		model:   config.GetGroqAudioModel(),
-		apiKey:  config.GetGroqAPIKey(),
-		client:  &http.Client{Timeout: config.GetGroqTimeout()},
+		baseURL:         config.GetGroqBaseURL(),
+		model:           config.GetGroqAudioModel(),
+		apiKey:          config.GetGroqAPIKey(),
+		client:          &http.Client{Timeout: config.GetGroqTimeout()},
+		requestInterval: config.GetGroqAudioRequestInterval(),
+		maxRetries:      config.GetGroqAudioMaxRetries(),
 	}
 }
 
@@ -192,49 +201,70 @@ func (c *HTTPClient) transcribeChunkFile(
 	}
 
 	endpoint := c.baseURL + "/audio/transcriptions"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
-	if err != nil {
-		return transcriptionResponse{}, err
-	}
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	for attempt := 1; attempt <= c.maxRetries; attempt++ {
+		if err := c.waitForTranscriptionSlot(ctx); err != nil {
+			return transcriptionResponse{}, err
+		}
 
-	log.Printf(
-		"[audio] sending Groq transcription request url=%s file=%s chunk=%d model=%s bytes=%d",
-		endpoint,
-		filepath.Base(originalName),
-		chunkIndex,
-		c.model,
-		len(fileData),
-	)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body.Bytes()))
+		if err != nil {
+			return transcriptionResponse{}, err
+		}
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return transcriptionResponse{}, err
-	}
-	defer resp.Body.Close()
+		log.Printf(
+			"[audio] sending Groq transcription request url=%s file=%s chunk=%d attempt=%d model=%s bytes=%d",
+			endpoint,
+			filepath.Base(originalName),
+			chunkIndex,
+			attempt,
+			c.model,
+			len(fileData),
+		)
 
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return transcriptionResponse{}, err
-	}
-	log.Printf(
-		"[audio] response status=%d file=%s chunk=%d body=%s",
-		resp.StatusCode,
-		originalName,
-		chunkIndex,
-		strings.TrimSpace(string(responseBody)),
-	)
-	if resp.StatusCode != http.StatusOK {
-		return transcriptionResponse{}, fmt.Errorf("groq transcription failed with status %d: %s", resp.StatusCode, string(responseBody))
+		resp, err := c.client.Do(req)
+		if err != nil {
+			if attempt == c.maxRetries {
+				return transcriptionResponse{}, err
+			}
+			if err := waitForRetry(ctx, time.Duration(attempt)*2*time.Second); err != nil {
+				return transcriptionResponse{}, err
+			}
+			continue
+		}
+
+		responseBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return transcriptionResponse{}, readErr
+		}
+		log.Printf(
+			"[audio] response status=%d file=%s chunk=%d attempt=%d body=%s",
+			resp.StatusCode,
+			originalName,
+			chunkIndex,
+			attempt,
+			strings.TrimSpace(string(responseBody)),
+		)
+		if resp.StatusCode == http.StatusOK {
+			var parsed transcriptionResponse
+			if err := json.Unmarshal(responseBody, &parsed); err != nil {
+				return transcriptionResponse{}, err
+			}
+			return parsed, nil
+		}
+
+		if !shouldRetryTranscription(resp.StatusCode) || attempt == c.maxRetries {
+			return transcriptionResponse{}, fmt.Errorf("groq transcription failed with status %d: %s", resp.StatusCode, string(responseBody))
+		}
+
+		if err := waitForRetry(ctx, transcriptionRetryDelay(resp.Header.Get("Retry-After"), responseBody, attempt)); err != nil {
+			return transcriptionResponse{}, err
+		}
 	}
 
-	var parsed transcriptionResponse
-	if err := json.Unmarshal(responseBody, &parsed); err != nil {
-		return transcriptionResponse{}, err
-	}
-
-	return parsed, nil
+	return transcriptionResponse{}, fmt.Errorf("groq transcription failed after %d attempts", c.maxRetries)
 }
 
 func buildAudioTexts(
@@ -471,4 +501,79 @@ func previewText(text string, limit int) string {
 		return text
 	}
 	return text[:limit] + "..."
+}
+
+func (c *HTTPClient) waitForTranscriptionSlot(ctx context.Context) error {
+	if c.requestInterval <= 0 {
+		return nil
+	}
+
+	c.rateMu.Lock()
+	now := time.Now()
+	if c.nextRequestAt.Before(now) {
+		c.nextRequestAt = now
+	}
+	slot := c.nextRequestAt
+	c.nextRequestAt = c.nextRequestAt.Add(c.requestInterval)
+	c.rateMu.Unlock()
+
+	wait := time.Until(slot)
+	if wait <= 0 {
+		return nil
+	}
+
+	return waitForRetry(ctx, wait)
+}
+
+func shouldRetryTranscription(statusCode int) bool {
+	return statusCode == http.StatusTooManyRequests || statusCode >= http.StatusInternalServerError
+}
+
+func transcriptionRetryDelay(retryAfter string, responseBody []byte, attempt int) time.Duration {
+	if seconds, ok := parseRetryAfterSeconds(retryAfter); ok {
+		return time.Duration(seconds) * time.Second
+	}
+	if seconds, ok := parseRetryAfterSeconds(string(responseBody)); ok {
+		return time.Duration(seconds) * time.Second
+	}
+
+	return time.Duration(attempt+1) * 3 * time.Second
+}
+
+func parseRetryAfterSeconds(raw string) (int, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, false
+	}
+
+	if value, err := strconv.Atoi(raw); err == nil && value > 0 {
+		return value, true
+	}
+
+	matches := regexp.MustCompile(`(?i)try again in (\d+)s`).FindStringSubmatch(raw)
+	if len(matches) != 2 {
+		return 0, false
+	}
+
+	value, err := strconv.Atoi(matches[1])
+	if err != nil || value <= 0 {
+		return 0, false
+	}
+	return value, true
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }

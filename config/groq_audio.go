@@ -42,3 +42,31 @@ func GetGroqTimeout() time.Duration {
 
 	return time.Duration(seconds) * time.Second
 }
+
+func GetGroqAudioRequestInterval() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("GROQ_AUDIO_REQUEST_INTERVAL_MS"))
+	if raw == "" {
+		return 3500 * time.Millisecond
+	}
+
+	milliseconds, err := strconv.Atoi(raw)
+	if err != nil || milliseconds < 0 {
+		return 3500 * time.Millisecond
+	}
+
+	return time.Duration(milliseconds) * time.Millisecond
+}
+
+func GetGroqAudioMaxRetries() int {
+	raw := strings.TrimSpace(os.Getenv("GROQ_AUDIO_MAX_RETRIES"))
+	if raw == "" {
+		return 4
+	}
+
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 4
+	}
+
+	return value
+}

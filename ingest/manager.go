@@ -262,6 +262,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	m.updateJob(queued.ID, func(target *models.UploadJob) {
 		target.Status = models.JobProcessing
 		target.Stage = "processing"
+		target.Summary = summarizeStage("processing")
 		target.UpdatedAt = startedAt
 		target.StartedAt = &startedAt
 	})
@@ -385,6 +386,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		pendingProcessed += result.Processed
 
 		if len(pendingRecords) >= m.storeBatchSize {
+			m.setJobStage(queued.ID, "storing")
 			log.Printf("[ingest] storing batch job=%s records=%d", queued.ID, len(pendingRecords))
 			storeStart := time.Now()
 			if err := m.store.AddRecords(pendingRecords); err != nil {
@@ -407,6 +409,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	}
 
 	if len(pendingRecords) > 0 {
+		m.setJobStage(queued.ID, "storing")
 		log.Printf("[ingest] storing final batch job=%s records=%d", queued.ID, len(pendingRecords))
 		storeStart := time.Now()
 		if err := m.store.AddRecords(pendingRecords); err != nil {
@@ -461,6 +464,7 @@ func (m *Manager) failJob(jobID string, err error) {
 		target.Status = models.JobFailed
 		target.Stage = "failed"
 		target.Error = err.Error()
+		target.Summary = summarizeStage("failed")
 		target.CompletedAt = &completedAt
 		target.UpdatedAt = completedAt
 		target.Metrics.TotalDurationMs = target.UpdatedAt.Sub(target.CreatedAt).Milliseconds()
@@ -470,6 +474,7 @@ func (m *Manager) failJob(jobID string, err error) {
 func (m *Manager) setJobStage(jobID string, stage string) {
 	m.updateJob(jobID, func(target *models.UploadJob) {
 		target.Stage = strings.TrimSpace(stage)
+		target.Summary = summarizeStage(stage)
 		target.UpdatedAt = time.Now().UTC()
 	})
 }
@@ -622,4 +627,31 @@ func previewText(text string, limit int) string {
 		return text
 	}
 	return text[:limit] + "..."
+}
+
+func summarizeStage(stage string) string {
+	switch strings.ToLower(strings.TrimSpace(stage)) {
+	case "queued":
+		return "Queued. Waiting to start processing."
+	case "processing":
+		return "Preparing your files for AI processing."
+	case "extracting":
+		return "Extracting data from your files."
+	case "downloading":
+		return "Downloading and preparing the video audio."
+	case "transcribing":
+		return "Transcribing audio into searchable text. This can take a little while for longer files."
+	case "chunking":
+		return "Normalizing and organizing the extracted content."
+	case "embedding":
+		return "Creating embeddings so your content can be searched semantically."
+	case "storing":
+		return "Saving everything to the vector database."
+	case "completed":
+		return "Your files are ready. You can start chatting now."
+	case "failed":
+		return "Processing failed."
+	default:
+		return "Processing your files."
+	}
 }
