@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -13,9 +15,19 @@ import (
 	"golang.org/x/net/websocket"
 )
 
+type youtubeUploadRequest struct {
+	FileKind string `json:"file_kind"`
+	URL      string `json:"url"`
+}
+
 func UploadHandler(c *gin.Context) {
 	trace.Start("UPLOAD", c.Request.URL.Path)
 	log.Printf("[upload] request received: method=%s path=%s", c.Request.Method, c.Request.URL.Path)
+
+	if strings.Contains(strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type"))), "application/json") {
+		handleYouTubeUpload(c)
+		return
+	}
 
 	form, err := c.MultipartForm()
 	if err != nil {
@@ -58,8 +70,54 @@ func UploadHandler(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{
 		"job_id":   job.ID,
 		"status":   job.Status,
+		"stage":    job.Stage,
 		"message":  "Upload accepted. Processing in background.",
 		"summary":  "Upload accepted. Processing in background.",
+		"files":    job.Files,
+		"metrics":  job.Metrics,
+		"accepted": true,
+	})
+}
+
+func handleYouTubeUpload(c *gin.Context) {
+	var req youtubeUploadRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		if errors.Is(err, io.EOF) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "request body is required"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
+
+	req.FileKind = strings.ToLower(strings.TrimSpace(req.FileKind))
+	req.URL = strings.TrimSpace(req.URL)
+	if req.FileKind != "youtube" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file_kind must be youtube"})
+		return
+	}
+	if req.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
+		return
+	}
+
+	log.Printf("[upload] submitted youtube url=%s kind=%s", req.URL, req.FileKind)
+
+	job, err := ingest.DefaultManager().SubmitYouTube(req.URL)
+	if err != nil {
+		log.Printf("[upload] failed to enqueue youtube job: %v", err)
+		trace.End("UPLOAD", "failed to enqueue youtube job")
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	trace.End("UPLOAD", "accepted youtube job_id="+job.ID)
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id":   job.ID,
+		"status":   job.Status,
+		"stage":    job.Stage,
+		"message":  "YouTube link accepted. Processing in background.",
+		"summary":  "YouTube link accepted. Processing in background.",
 		"files":    job.Files,
 		"metrics":  job.Metrics,
 		"accepted": true,
@@ -81,6 +139,7 @@ func statusForClient(job *models.UploadJob) gin.H {
 	return gin.H{
 		"job_id":       job.ID,
 		"status":       job.Status,
+		"stage":        job.Stage,
 		"created_at":   job.CreatedAt,
 		"updated_at":   job.UpdatedAt,
 		"started_at":   job.StartedAt,

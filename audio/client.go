@@ -184,13 +184,18 @@ func buildAudioMetadataBlock(staged models.StagedFile, response transcriptionRes
 		durationLine = fmt.Sprintf("Estimated duration: %.2f seconds", duration)
 	}
 
-	return strings.TrimSpace(strings.Join([]string{
+	lines := []string{
 		"Uploaded Audio Metadata",
 		"Actual uploaded filename: " + strings.TrimSpace(staged.OriginalName),
 		"Detected file type: " + strings.ToUpper(strings.TrimSpace(staged.DetectedKind)),
 		"Content-Type: " + strings.TrimSpace(staged.ContentType),
 		durationLine,
-	}, "\n"))
+	}
+	if strings.TrimSpace(staged.SourceURL) != "" {
+		lines = append(lines, "Source URL: "+strings.TrimSpace(staged.SourceURL))
+	}
+
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func estimateAudioDuration(response transcriptionResponse) float64 {

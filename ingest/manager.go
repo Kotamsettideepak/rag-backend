@@ -95,6 +95,42 @@ func (m *Manager) SubmitUpload(files []*multipart.FileHeader) (*models.UploadJob
 	job := &models.UploadJob{
 		ID:        jobID,
 		Status:    models.JobQueued,
+		Stage:     "queued",
+		CreatedAt: now,
+		UpdatedAt: now,
+		QueuedAt:  now,
+		FileCount: len(stagedFiles),
+		Files:     make([]models.FileResult, 0, len(stagedFiles)),
+	}
+
+	for _, file := range stagedFiles {
+		job.Files = append(job.Files, models.FileResult{
+			FileID:   file.FileID,
+			FileName: file.OriginalName,
+			Status:   "queued",
+		})
+	}
+
+	m.mu.Lock()
+	m.jobs[jobID] = job
+	m.mu.Unlock()
+
+	m.jobQueue <- queuedJob{ID: jobID, Files: stagedFiles}
+	return cloneJob(job), nil
+}
+
+func (m *Manager) SubmitYouTube(url string) (*models.UploadJob, error) {
+	stagedFiles, err := m.parser.StageYouTubeURL(url)
+	if err != nil {
+		return nil, err
+	}
+
+	jobID := generateID()
+	now := time.Now().UTC()
+	job := &models.UploadJob{
+		ID:        jobID,
+		Status:    models.JobQueued,
+		Stage:     "queued",
 		CreatedAt: now,
 		UpdatedAt: now,
 		QueuedAt:  now,
@@ -225,6 +261,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	startedAt := time.Now().UTC()
 	m.updateJob(queued.ID, func(target *models.UploadJob) {
 		target.Status = models.JobProcessing
+		target.Stage = "processing"
 		target.UpdatedAt = startedAt
 		target.StartedAt = &startedAt
 	})
@@ -239,7 +276,15 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	trace.Mark("INGEST", "starting extraction")
 
 	for _, file := range queued.Files {
+		stopProgress := func() {}
+		if file.DetectedKind == KindYouTube {
+			stopProgress = m.startYouTubeExtractionProgress(queued.ID)
+		} else {
+			m.setJobStage(queued.ID, "extracting")
+		}
+
 		document, err := m.router.Extract(ctx, file)
+		stopProgress()
 		if err != nil {
 			trace.End("INGEST", "extract failed file="+file.OriginalName)
 			m.failJob(queued.ID, fmt.Errorf("extract failed for %s: %w", file.OriginalName, err))
@@ -264,6 +309,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 
 	chunkStart := time.Now()
 	allChunks := make([]models.Chunk, 0)
+	m.setJobStage(queued.ID, "chunking")
 	trace.Mark("INGEST", "starting chunking")
 	for _, document := range documents {
 		chunks := m.chunker.ChunkDocument(document)
@@ -287,6 +333,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		completedAt := time.Now().UTC()
 		m.updateJob(queued.ID, func(target *models.UploadJob) {
 			target.Status = models.JobCompleted
+			target.Stage = "completed"
 			target.CompletedAt = &completedAt
 			target.UpdatedAt = completedAt
 			target.Summary = "Upload completed, but no extractable text was found."
@@ -297,6 +344,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	}
 
 	batches := splitIntoBatches(allChunks, m.batchSize)
+	m.setJobStage(queued.ID, "embedding")
 	trace.Mark("INGEST", fmt.Sprintf("starting embedding batches=%d total_chunks=%d", len(batches), len(allChunks)))
 	resultChannel := make(chan worker.BatchResult, len(batches))
 	for _, batch := range batches {
@@ -385,6 +433,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	completedAt := time.Now().UTC()
 	m.updateJob(queued.ID, func(target *models.UploadJob) {
 		target.Status = models.JobCompleted
+		target.Stage = "completed"
 		target.CompletedAt = &completedAt
 		target.UpdatedAt = completedAt
 		target.Summary = "Upload completed. The files are ready for chat."
@@ -410,11 +459,43 @@ func (m *Manager) failJob(jobID string, err error) {
 	completedAt := time.Now().UTC()
 	m.updateJob(jobID, func(target *models.UploadJob) {
 		target.Status = models.JobFailed
+		target.Stage = "failed"
 		target.Error = err.Error()
 		target.CompletedAt = &completedAt
 		target.UpdatedAt = completedAt
 		target.Metrics.TotalDurationMs = target.UpdatedAt.Sub(target.CreatedAt).Milliseconds()
 	})
+}
+
+func (m *Manager) setJobStage(jobID string, stage string) {
+	m.updateJob(jobID, func(target *models.UploadJob) {
+		target.Stage = strings.TrimSpace(stage)
+		target.UpdatedAt = time.Now().UTC()
+	})
+}
+
+func (m *Manager) startYouTubeExtractionProgress(jobID string) func() {
+	m.setJobStage(jobID, "downloading")
+
+	done := make(chan struct{})
+	go func() {
+		timer := time.NewTimer(2 * time.Second)
+		defer timer.Stop()
+
+		select {
+		case <-timer.C:
+			m.setJobStage(jobID, "transcribing")
+		case <-done:
+			return
+		}
+	}()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			close(done)
+		})
+	}
 }
 
 func (m *Manager) updateJob(jobID string, update func(*models.UploadJob)) {

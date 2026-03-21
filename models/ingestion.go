@@ -26,6 +26,7 @@ type StagedFile struct {
 	FileID        string `json:"file_id"`
 	OriginalName  string `json:"original_name"`
 	StoredPath    string `json:"stored_path"`
+	SourceURL     string `json:"source_url,omitempty"`
 	Size          int64  `json:"size"`
 	ContentType   string `json:"content_type"`
 	DetectedKind  string `json:"detected_kind"`
@@ -62,6 +63,7 @@ type UploadJob struct {
 	TotalChunks     int             `json:"total_chunks"`
 	CompletedChunks int             `json:"completed_chunks"`
 	FailedChunks    int             `json:"failed_chunks"`
+	Stage           string          `json:"stage,omitempty"`
 	Summary         string          `json:"summary,omitempty"`
 	Error           string          `json:"error,omitempty"`
 	Metrics         JobMetrics      `json:"metrics"`

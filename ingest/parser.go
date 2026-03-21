@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"mime/multipart"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,8 +60,37 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader) ([]models.StagedFile,
 	return staged, nil
 }
 
+func (p *Parser) StageYouTubeURL(rawURL string) ([]models.StagedFile, error) {
+	rawURL = strings.TrimSpace(rawURL)
+	if rawURL == "" {
+		return nil, fmt.Errorf("youtube url is required")
+	}
+	if err := validateYouTubeURL(rawURL); err != nil {
+		return nil, err
+	}
+
+	fileID := generateID()
+	displayName := deriveYouTubeDisplayName(rawURL)
+	staged := []models.StagedFile{
+		{
+			FileID:        fileID,
+			OriginalName:  displayName,
+			SourceURL:     rawURL,
+			ContentType:   "text/url",
+			DetectedKind:  KindYouTube,
+			OriginalOrder: 0,
+		},
+	}
+
+	log.Printf("[parser] url=%s detected_kind=%s display_name=%s", rawURL, KindYouTube, displayName)
+	return staged, nil
+}
+
 func (p *Parser) Cleanup(staged []models.StagedFile) {
 	for _, file := range staged {
+		if strings.TrimSpace(file.StoredPath) == "" {
+			continue
+		}
 		if err := os.Remove(file.StoredPath); err != nil && !os.IsNotExist(err) {
 			log.Printf("[parser] failed to remove staged file %s: %v", file.StoredPath, err)
 		}
@@ -88,4 +118,40 @@ func sanitizeFilename(name string) string {
 	name = filepath.Base(name)
 	name = strings.ReplaceAll(name, " ", "_")
 	return name
+}
+
+func validateYouTubeURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid youtube url")
+	}
+
+	host := strings.ToLower(parsed.Hostname())
+	if host == "" {
+		return fmt.Errorf("invalid youtube url")
+	}
+
+	switch host {
+	case "youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "www.youtu.be":
+		return nil
+	default:
+		return fmt.Errorf("only youtube links are supported")
+	}
+}
+
+func deriveYouTubeDisplayName(rawURL string) string {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return "YouTube video"
+	}
+
+	videoID := strings.TrimSpace(parsed.Query().Get("v"))
+	if videoID == "" {
+		videoID = strings.Trim(strings.TrimSpace(parsed.Path), "/")
+	}
+	if videoID == "" {
+		return "YouTube video"
+	}
+
+	return "YouTube video: " + videoID
 }

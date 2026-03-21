@@ -42,7 +42,7 @@ type extractResponse struct {
 func NewHTTPClient() Client {
 	return &HTTPClient{
 		baseURL: config.GetExtractorBaseURL(),
-		client:  &http.Client{Timeout: 90 * time.Second},
+		client:  &http.Client{Timeout: 10 * time.Minute},
 	}
 }
 
@@ -55,13 +55,9 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		staged.StoredPath,
 	)
 
-	fileData, err := os.ReadFile(staged.StoredPath)
-	if err != nil {
-		return models.ParsedDocument{}, err
-	}
-
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
+	var err error
 
 	if err := writer.WriteField("file_kind", staged.DetectedKind); err != nil {
 		return models.ParsedDocument{}, err
@@ -73,12 +69,20 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		return models.ParsedDocument{}, err
 	}
 
-	part, err := writer.CreateFormFile("file", filepath.Base(staged.OriginalName))
-	if err != nil {
-		return models.ParsedDocument{}, err
-	}
-	if _, err := part.Write(fileData); err != nil {
-		return models.ParsedDocument{}, err
+	fileData := []byte(nil)
+	if strings.TrimSpace(staged.StoredPath) != "" {
+		fileData, err = os.ReadFile(staged.StoredPath)
+		if err != nil {
+			return models.ParsedDocument{}, err
+		}
+
+		part, err := writer.CreateFormFile("file", filepath.Base(staged.OriginalName))
+		if err != nil {
+			return models.ParsedDocument{}, err
+		}
+		if _, err := part.Write(fileData); err != nil {
+			return models.ParsedDocument{}, err
+		}
 	}
 	if err := writer.Close(); err != nil {
 		return models.ParsedDocument{}, err
@@ -119,7 +123,7 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 	document := models.ParsedDocument{
 		FileID:    staged.FileID,
 		FileName:  staged.OriginalName,
-		FileKind:  staged.DetectedKind,
+		FileKind:  strings.TrimSpace(staged.DetectedKind),
 		Text:      buildDocumentText(staged, parsed.Elements),
 		PageTexts: buildPageTexts(staged, parsed.Elements),
 	}
@@ -165,12 +169,13 @@ func collectElementText(elements []documentElement) []string {
 }
 
 func buildFileMetadataBlock(staged models.StagedFile) string {
-	return strings.TrimSpace(strings.Join([]string{
+	lines := []string{
 		"Uploaded File Metadata",
 		"Actual uploaded filename: " + strings.TrimSpace(staged.OriginalName),
 		"Detected file type: " + strings.ToUpper(strings.TrimSpace(staged.DetectedKind)),
 		"Content-Type: " + strings.TrimSpace(staged.ContentType),
-	}, "\n"))
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func groupPageTexts(elements []documentElement) []string {

@@ -3,9 +3,10 @@ package ingest
 import "strings"
 
 const (
-	KindPDF   = "pdf"
-	KindAudio = "audio"
-	KindImage = "image"
+	KindPDF     = "pdf"
+	KindAudio   = "audio"
+	KindImage   = "image"
+	KindYouTube = "youtube"
 )
 
 var supportedAudioExtensions = []string{
@@ -46,7 +47,7 @@ func detectKind(filename string, contentType string) string {
 
 func isSupportedKind(kind string) bool {
 	switch kind {
-	case KindPDF, KindAudio, KindImage:
+	case KindPDF, KindAudio, KindImage, KindYouTube:
 		return true
 	default:
 		return false
