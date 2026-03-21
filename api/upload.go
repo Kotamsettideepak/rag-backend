@@ -7,12 +7,14 @@ import (
 
 	"gin-backend/ingest"
 	"gin-backend/models"
+	"gin-backend/trace"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/websocket"
 )
 
 func UploadHandler(c *gin.Context) {
+	trace.Start("UPLOAD", c.Request.URL.Path)
 	log.Printf("[upload] request received: method=%s path=%s", c.Request.Method, c.Request.URL.Path)
 
 	form, err := c.MultipartForm()
@@ -35,12 +37,23 @@ func UploadHandler(c *gin.Context) {
 		return
 	}
 
+	for _, file := range files {
+		log.Printf(
+			"[upload] submitted file name=%s content_type=%s size=%d",
+			file.Filename,
+			file.Header.Get("Content-Type"),
+			file.Size,
+		)
+	}
+
 	job, err := ingest.DefaultManager().SubmitUpload(files)
 	if err != nil {
 		log.Printf("[upload] failed to enqueue ingestion job: %v", err)
+		trace.End("UPLOAD", "failed to enqueue job")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	trace.End("UPLOAD", "accepted job_id="+job.ID)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"job_id":   job.ID,

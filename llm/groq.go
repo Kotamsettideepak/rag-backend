@@ -93,6 +93,14 @@ func NewGroqClient() LLMClient {
 	}
 }
 
+func CurrentGroqModel() string {
+	model := strings.TrimSpace(os.Getenv("GROQ_MODEL"))
+	if model == "" {
+		return defaultGroqModel
+	}
+	return model
+}
+
 func (g *GroqClient) GenerateResponse(messages []Message) (string, error) {
 	body, err := g.doChatCompletion(context.Background(), chatCompletionRequest{
 		Model:    g.model,

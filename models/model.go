@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -94,6 +96,7 @@ func (o *OllamaClient) GenerateEmbedding(text string) ([]float64, error) {
 }
 
 func (o *OllamaClient) GenerateEmbeddingWithContext(ctx context.Context, text string) ([]float64, error) {
+	log.Printf("[embedding] query embedding model=%s input_chars=%d preview=%s", MODEL_EMBEDDING, len(text), previewText(text, 180))
 	embeddings, err := o.GenerateEmbeddingsWithContext(ctx, []string{text})
 	if err != nil {
 		return nil, err
@@ -110,6 +113,13 @@ func (o *OllamaClient) GenerateEmbeddingsWithContext(ctx context.Context, texts 
 	if len(texts) == 0 {
 		return nil, nil
 	}
+	log.Printf(
+		"[embedding] batch embedding model=%s batch_size=%d first_input_chars=%d first_preview=%s",
+		MODEL_EMBEDDING,
+		len(texts),
+		len(texts[0]),
+		previewText(texts[0], 180),
+	)
 
 	req := BatchEmbeddingRequest{
 		Model: MODEL_EMBEDDING,
@@ -129,6 +139,17 @@ func (o *OllamaClient) GenerateEmbeddingsWithContext(ctx context.Context, texts 
 	if len(res.Embeddings) != len(texts) {
 		return nil, fmt.Errorf("ollama returned %d embeddings for %d inputs", len(res.Embeddings), len(texts))
 	}
+	if len(res.Embeddings) > 0 {
+		log.Printf("[embedding] batch embedding completed vectors=%d dims=%d", len(res.Embeddings), len(res.Embeddings[0]))
+	}
 
 	return res.Embeddings, nil
+}
+
+func previewText(text string, limit int) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "..."
 }

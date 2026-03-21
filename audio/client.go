@@ -54,6 +54,15 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		return models.ParsedDocument{}, fmt.Errorf("GROQ_API_KEY is not configured")
 	}
 
+	log.Printf(
+		"[audio] preparing transcription file=%s kind=%s content_type=%s path=%s model=%s",
+		staged.OriginalName,
+		staged.DetectedKind,
+		staged.ContentType,
+		staged.StoredPath,
+		c.model,
+	)
+
 	fileData, err := os.ReadFile(staged.StoredPath)
 	if err != nil {
 		return models.ParsedDocument{}, err
@@ -120,6 +129,14 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 	if err := json.Unmarshal(responseBody, &parsed); err != nil {
 		return models.ParsedDocument{}, err
 	}
+	log.Printf(
+		"[audio] extracted file=%s duration=%.2fs segments=%d text_chars=%d preview=%s",
+		staged.OriginalName,
+		estimateAudioDuration(parsed),
+		len(parsed.Segments),
+		len(parsed.Text),
+		previewText(parsed.Text, 220),
+	)
 
 	documentText, pageTexts := buildAudioTexts(staged, parsed)
 
@@ -194,4 +211,12 @@ func maxInt(left int, right int) int {
 		return left
 	}
 	return right
+}
+
+func previewText(text string, limit int) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "..."
 }

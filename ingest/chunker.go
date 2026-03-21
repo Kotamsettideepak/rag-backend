@@ -3,6 +3,7 @@ package ingest
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"log"
 	"strconv"
 	"strings"
 
@@ -78,6 +79,17 @@ func (c *Chunker) ChunkDocument(doc models.ParsedDocument) []models.Chunk {
 		})
 		index++
 	}
+
+	log.Printf(
+		"[chunker] file=%s kind=%s pages=%d produced_chunks=%d target_size=%d overlap=%d first_chunk_preview=%s",
+		doc.FileName,
+		doc.FileKind,
+		len(doc.PageTexts),
+		len(chunks),
+		c.TargetSize,
+		c.OverlapSize,
+		firstChunkPreview(chunks),
+	)
 
 	return chunks
 }
@@ -183,4 +195,15 @@ func hashBytesToShort(hash []byte) string {
 
 func itoa(value int) string {
 	return strconv.Itoa(value)
+}
+
+func firstChunkPreview(chunks []models.Chunk) string {
+	if len(chunks) == 0 {
+		return ""
+	}
+	text := strings.Join(strings.Fields(strings.TrimSpace(chunks[0].Text)), " ")
+	if len(text) <= 180 {
+		return text
+	}
+	return text[:180] + "..."
 }

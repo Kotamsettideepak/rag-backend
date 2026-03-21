@@ -153,6 +153,15 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 	)
 
 	documentText, pageTexts := buildImageTexts(staged, result)
+	log.Printf(
+		"[visual] extracted file=%s objects=%d colors=%d text_in_image=%d analysis_chars=%d preview=%s",
+		staged.OriginalName,
+		len(result.Objects),
+		len(result.Colors),
+		len(result.TextInImage),
+		len(documentText),
+		previewText(documentText, 220),
+	)
 
 	return models.ParsedDocument{
 		FileID:    staged.FileID,
@@ -382,4 +391,12 @@ func detectImageMIMEType(staged models.StagedFile) string {
 
 func encodeBase64(fileData []byte) string {
 	return base64.StdEncoding.EncodeToString(fileData)
+}
+
+func previewText(text string, limit int) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "..."
 }

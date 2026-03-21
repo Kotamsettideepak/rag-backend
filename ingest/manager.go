@@ -7,12 +7,14 @@ import (
 	"mime/multipart"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"gin-backend/db"
 	"gin-backend/embedding"
 	"gin-backend/models"
+	"gin-backend/trace"
 	"gin-backend/worker"
 )
 
@@ -172,17 +174,26 @@ func (m *Manager) SubscribeJob(jobID string) (<-chan *models.UploadJob, func(), 
 }
 
 func (m *Manager) SearchContext(ctx context.Context, question string) (models.SearchContextResult, error) {
+	log.Printf("[search] question=%s", previewText(question, 220))
 	embeddingVector, err := m.embedder.EmbedQuery(ctx, question)
 	if err != nil {
 		return models.SearchContextResult{}, err
 	}
+	log.Printf("[search] question embedding dims=%d", len(embeddingVector))
 
 	matches, err := m.store.Search(embeddingVector, m.queryTopK)
 	if err != nil {
 		return models.SearchContextResult{}, err
 	}
-
-	return buildSearchContextResult(question, matches, m.store), nil
+	result := buildSearchContextResult(question, matches, m.store)
+	log.Printf(
+		"[search] context modality=%s matches=%d context_chars=%d preview=%s",
+		result.Modality,
+		len(matches),
+		len(result.Context),
+		previewText(result.Context, 320),
+	)
+	return result, nil
 }
 
 func (m *Manager) ClearContext() error {
@@ -209,6 +220,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	if _, ok := m.GetJob(queued.ID); !ok {
 		return
 	}
+	trace.Start("INGEST", "job_id="+queued.ID)
 
 	startedAt := time.Now().UTC()
 	m.updateJob(queued.ID, func(target *models.UploadJob) {
@@ -224,15 +236,25 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	processStarted := time.Now()
 	parseStart := time.Now()
 	documents := make([]models.ParsedDocument, 0, len(queued.Files))
+	trace.Mark("INGEST", "starting extraction")
 
 	for _, file := range queued.Files {
 		document, err := m.router.Extract(ctx, file)
 		if err != nil {
+			trace.End("INGEST", "extract failed file="+file.OriginalName)
 			m.failJob(queued.ID, fmt.Errorf("extract failed for %s: %w", file.OriginalName, err))
 			return
 		}
 
 		documents = append(documents, document)
+		log.Printf(
+			"[ingest] extracted file=%s kind=%s pages=%d text_chars=%d preview=%s",
+			document.FileName,
+			document.FileKind,
+			len(document.PageTexts),
+			len(document.Text),
+			previewText(document.Text, 220),
+		)
 		m.updateFile(queued.ID, file.FileID, func(result *models.FileResult) {
 			result.Status = "parsed"
 			result.Pages = len(document.PageTexts)
@@ -242,9 +264,11 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 
 	chunkStart := time.Now()
 	allChunks := make([]models.Chunk, 0)
+	trace.Mark("INGEST", "starting chunking")
 	for _, document := range documents {
 		chunks := m.chunker.ChunkDocument(document)
 		allChunks = append(allChunks, chunks...)
+		log.Printf("[ingest] chunked file=%s kind=%s chunks=%d", document.FileName, document.FileKind, len(chunks))
 
 		m.updateFile(queued.ID, document.FileID, func(result *models.FileResult) {
 			result.Status = "chunked"
@@ -268,12 +292,25 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 			target.Summary = "Upload completed, but no extractable text was found."
 			target.Metrics.TotalDurationMs = time.Since(processStarted).Milliseconds()
 		})
+		trace.End("INGEST", "completed with no extractable text")
 		return
 	}
 
 	batches := splitIntoBatches(allChunks, m.batchSize)
+	trace.Mark("INGEST", fmt.Sprintf("starting embedding batches=%d total_chunks=%d", len(batches), len(allChunks)))
 	resultChannel := make(chan worker.BatchResult, len(batches))
 	for _, batch := range batches {
+		if len(batch) > 0 {
+			log.Printf(
+				"[ingest] embedding batch job=%s batch_size=%d file=%s kind=%s first_chunk_idx=%d preview=%s",
+				queued.ID,
+				len(batch),
+				batch[0].FileName,
+				batch[0].FileKind,
+				batch[0].Index,
+				previewText(batch[0].Text, 180),
+			)
+		}
 		m.pool.Submit(worker.BatchTask{
 			Ctx:      ctx,
 			JobID:    queued.ID,
@@ -291,6 +328,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		embeddingDuration += result.Duration
 
 		if result.Err != nil {
+			trace.End("INGEST", "embedding failed")
 			m.failJob(queued.ID, result.Err)
 			return
 		}
@@ -299,8 +337,10 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		pendingProcessed += result.Processed
 
 		if len(pendingRecords) >= m.storeBatchSize {
+			log.Printf("[ingest] storing batch job=%s records=%d", queued.ID, len(pendingRecords))
 			storeStart := time.Now()
 			if err := m.store.AddRecords(pendingRecords); err != nil {
+				trace.End("INGEST", "storage failed")
 				m.failJob(queued.ID, fmt.Errorf("vector store failed: %w", err))
 				return
 			}
@@ -319,8 +359,10 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	}
 
 	if len(pendingRecords) > 0 {
+		log.Printf("[ingest] storing final batch job=%s records=%d", queued.ID, len(pendingRecords))
 		storeStart := time.Now()
 		if err := m.store.AddRecords(pendingRecords); err != nil {
+			trace.End("INGEST", "final storage failed")
 			m.failJob(queued.ID, fmt.Errorf("vector store failed: %w", err))
 			return
 		}
@@ -358,6 +400,7 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 			}
 		}
 	})
+	trace.End("INGEST", fmt.Sprintf("job_id=%s chunks=%d", queued.ID, len(allChunks)))
 
 	log.Printf("[ingest] job=%s completed files=%d chunks=%d total=%s parse=%s chunk=%s embed=%s store=%s throughput=%.2f chunks/sec", queued.ID, len(queued.Files), len(allChunks), totalDuration, parseDuration, chunkDuration, embeddingDuration, storageDuration, throughput)
 }
@@ -490,4 +533,12 @@ func minInt(left int, right int) int {
 		return left
 	}
 	return right
+}
+
+func previewText(text string, limit int) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "..."
 }

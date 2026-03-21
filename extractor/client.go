@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"os"
@@ -46,6 +47,14 @@ func NewHTTPClient() Client {
 }
 
 func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (models.ParsedDocument, error) {
+	log.Printf(
+		"[extractor] preparing request file=%s kind=%s content_type=%s path=%s model=PyMuPDF/FastAPI",
+		staged.OriginalName,
+		staged.DetectedKind,
+		staged.ContentType,
+		staged.StoredPath,
+	)
+
 	fileData, err := os.ReadFile(staged.StoredPath)
 	if err != nil {
 		return models.ParsedDocument{}, err
@@ -80,6 +89,12 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		return models.ParsedDocument{}, err
 	}
 	req.Header.Set("Content-Type", writer.FormDataContentType())
+	log.Printf(
+		"[extractor] sending request url=%s file=%s bytes=%d",
+		c.baseURL+"/extract",
+		staged.OriginalName,
+		len(fileData),
+	)
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -91,6 +106,7 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 	if err != nil {
 		return models.ParsedDocument{}, err
 	}
+	log.Printf("[extractor] response status=%d file=%s body_bytes=%d", resp.StatusCode, staged.OriginalName, len(responseBody))
 	if resp.StatusCode != http.StatusOK {
 		return models.ParsedDocument{}, fmt.Errorf("extractor failed with status %d: %s", resp.StatusCode, string(responseBody))
 	}
@@ -100,13 +116,22 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		return models.ParsedDocument{}, err
 	}
 
-	return models.ParsedDocument{
+	document := models.ParsedDocument{
 		FileID:    staged.FileID,
 		FileName:  staged.OriginalName,
 		FileKind:  staged.DetectedKind,
 		Text:      buildDocumentText(staged, parsed.Elements),
 		PageTexts: buildPageTexts(staged, parsed.Elements),
-	}, nil
+	}
+	log.Printf(
+		"[extractor] extracted file=%s elements=%d pages=%d text_chars=%d preview=%s",
+		staged.OriginalName,
+		len(parsed.Elements),
+		len(document.PageTexts),
+		len(document.Text),
+		previewText(document.Text, 220),
+	)
+	return document, nil
 }
 
 func buildDocumentText(staged models.StagedFile, elements []documentElement) string {
@@ -190,4 +215,12 @@ func groupPageTexts(elements []documentElement) []string {
 	}
 
 	return pages
+}
+
+func previewText(text string, limit int) string {
+	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+	return text[:limit] + "..."
 }
