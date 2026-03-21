@@ -80,6 +80,8 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		ContentType:   "audio/mpeg",
 		DetectedKind:  "audio",
 		OriginalOrder: staged.OriginalOrder,
+		ChatID:        staged.ChatID,
+		UserID:        staged.UserID,
 	}
 
 	return c.audioClient.Extract(ctx, audioStaged)

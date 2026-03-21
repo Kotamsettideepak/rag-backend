@@ -9,6 +9,7 @@ import (
 
 	"gin-backend/ingest"
 	"gin-backend/llm"
+	"gin-backend/store"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/websocket"
@@ -16,6 +17,7 @@ import (
 
 type wsChatRequest struct {
 	Type     string `json:"type"`
+	ChatID   string `json:"chat_id"`
 	Question string `json:"question"`
 }
 
@@ -40,10 +42,10 @@ func ChatWebSocketHandler(c *gin.Context) {
 				return
 			}
 
-			if strings.TrimSpace(req.Question) == "" {
+			if strings.TrimSpace(req.ChatID) == "" || strings.TrimSpace(req.Question) == "" {
 				if err := websocket.JSON.Send(conn, wsChatResponse{
 					Type:    "error",
-					Message: "question is required",
+					Message: "chat_id and question are required",
 				}); err != nil {
 					log.Printf("[ws] send validation error failed: %v", err)
 					return
@@ -51,7 +53,7 @@ func ChatWebSocketHandler(c *gin.Context) {
 				continue
 			}
 
-			if err := streamChatResponse(conn, strings.TrimSpace(req.Question)); err != nil {
+			if err := streamChatResponse(conn, strings.TrimSpace(req.ChatID), strings.TrimSpace(req.Question)); err != nil {
 				log.Printf("[ws] stream failed: %v", err)
 				if sendErr := websocket.JSON.Send(conn, wsChatResponse{
 					Type:    "error",
@@ -65,11 +67,22 @@ func ChatWebSocketHandler(c *gin.Context) {
 	}).ServeHTTP(c.Writer, c.Request)
 }
 
-func streamChatResponse(conn *websocket.Conn, question string) error {
+func streamChatResponse(conn *websocket.Conn, chatID string, question string) error {
 	ctx, cancel := context.WithTimeout(conn.Request().Context(), 90*time.Second)
 	defer cancel()
 
-	contextResult, err := ingest.DefaultManager().SearchContext(ctx, question)
+	user, err := resolveCurrentUserFromRequest(conn.Request())
+	if err != nil {
+		return fmt.Errorf("failed to resolve google user: %w", err)
+	}
+	if _, err := store.DefaultStore().GetChat(ctx, chatID, user.ID); err != nil {
+		return fmt.Errorf("chat not found")
+	}
+	if _, err := store.DefaultStore().SaveMessage(ctx, chatID, "user", question); err != nil {
+		return fmt.Errorf("failed to save user message: %w", err)
+	}
+
+	contextResult, err := ingest.DefaultManager().SearchContext(ctx, question, chatID, user.ID)
 	if err != nil {
 		return fmt.Errorf("failed to search for context: %w", err)
 	}
@@ -79,7 +92,11 @@ func streamChatResponse(conn *websocket.Conn, question string) error {
 	}
 
 	log.Printf("[ws] context modality=%s", contextResult.Modality)
-	prompt := buildPrompt(contextResult.Modality, contextResult.Context, question)
+	previousMessages, err := store.DefaultStore().ListMessages(ctx, chatID, 10)
+	if err != nil {
+		return fmt.Errorf("failed to load messages: %w", err)
+	}
+	prompt := buildPrompt(contextResult.Modality, contextResult.Context, buildConversationContext(previousMessages), question)
 
 	client := llm.NewGroqClient()
 	stream := make(chan string)
@@ -104,6 +121,10 @@ func streamChatResponse(conn *websocket.Conn, question string) error {
 		case err := <-done:
 			if err != nil {
 				return fmt.Errorf("failed to generate text response: %w", err)
+			}
+
+			if _, saveErr := store.DefaultStore().SaveMessage(ctx, chatID, "assistant", answerBuilder.String()); saveErr != nil {
+				return fmt.Errorf("failed to save assistant message: %w", saveErr)
 			}
 
 			return websocket.JSON.Send(conn, wsChatResponse{

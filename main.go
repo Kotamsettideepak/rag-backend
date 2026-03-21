@@ -13,6 +13,7 @@ import (
 	"gin-backend/config"
 	"gin-backend/ingest"
 	"gin-backend/routes"
+	"gin-backend/store"
 
 	"github.com/gin-gonic/gin"
 )
@@ -34,6 +35,11 @@ func main() {
 		log.Fatalf("[startup] failed to ensure extractor is running: %v", err)
 	}
 	defer config.ShutdownExtractorIfStarted()
+
+	if err := store.InitDefaultStore(context.Background()); err != nil {
+		log.Fatalf("[startup] failed to initialize postgres store: %v", err)
+	}
+	defer store.DefaultStore().Close()
 
 	manager := ingest.DefaultManager()
 	defer manager.Shutdown()

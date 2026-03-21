@@ -27,10 +27,13 @@ type StagedFile struct {
 	OriginalName  string `json:"original_name"`
 	StoredPath    string `json:"stored_path"`
 	SourceURL     string `json:"source_url,omitempty"`
+	CloudURL      string `json:"cloud_url,omitempty"`
 	Size          int64  `json:"size"`
 	ContentType   string `json:"content_type"`
 	DetectedKind  string `json:"detected_kind"`
 	OriginalOrder int    `json:"original_order"`
+	ChatID        string `json:"chat_id,omitempty"`
+	UserID        string `json:"user_id,omitempty"`
 }
 
 type FileResult struct {
@@ -76,6 +79,8 @@ type ParsedDocument struct {
 	Text        string
 	PageTexts   []string
 	AudioChunks []AudioTranscriptChunk
+	ChatID      string
+	UserID      string
 }
 
 type Chunk struct {
@@ -83,6 +88,8 @@ type Chunk struct {
 	FileID   string
 	FileName string
 	FileKind string
+	ChatID   string
+	UserID   string
 	Page     int
 	Index    int
 	Text     string

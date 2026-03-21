@@ -9,6 +9,7 @@ import (
 
 	"gin-backend/ingest"
 	"gin-backend/models"
+	"gin-backend/store"
 	"gin-backend/trace"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,7 @@ import (
 type youtubeUploadRequest struct {
 	FileKind string `json:"file_kind"`
 	URL      string `json:"url"`
+	ChatID   string `json:"chat_id"`
 }
 
 func UploadHandler(c *gin.Context) {
@@ -49,6 +51,22 @@ func UploadHandler(c *gin.Context) {
 		return
 	}
 
+	user, err := resolveCurrentUser(c)
+	if err != nil {
+		respondAuthError(c, err)
+		return
+	}
+
+	chatID := strings.TrimSpace(c.PostForm("chat_id"))
+	if chatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is required"})
+		return
+	}
+	if _, err := store.DefaultStore().GetChat(c.Request.Context(), chatID, user.ID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
+		return
+	}
+
 	for _, file := range files {
 		log.Printf(
 			"[upload] submitted file name=%s content_type=%s size=%d",
@@ -58,7 +76,7 @@ func UploadHandler(c *gin.Context) {
 		)
 	}
 
-	job, err := ingest.DefaultManager().SubmitUpload(files)
+	job, err := ingest.DefaultManager().SubmitUpload(files, chatID, user.ID)
 	if err != nil {
 		log.Printf("[upload] failed to enqueue ingestion job: %v", err)
 		trace.End("UPLOAD", "failed to enqueue job")
@@ -92,6 +110,7 @@ func handleYouTubeUpload(c *gin.Context) {
 
 	req.FileKind = strings.ToLower(strings.TrimSpace(req.FileKind))
 	req.URL = strings.TrimSpace(req.URL)
+	req.ChatID = strings.TrimSpace(req.ChatID)
 	if req.FileKind != "youtube" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file_kind must be youtube"})
 		return
@@ -100,10 +119,24 @@ func handleYouTubeUpload(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "url is required"})
 		return
 	}
+	if req.ChatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is required"})
+		return
+	}
+
+	user, err := resolveCurrentUser(c)
+	if err != nil {
+		respondAuthError(c, err)
+		return
+	}
+	if _, err := store.DefaultStore().GetChat(c.Request.Context(), req.ChatID, user.ID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
+		return
+	}
 
 	log.Printf("[upload] submitted youtube url=%s kind=%s", req.URL, req.FileKind)
 
-	job, err := ingest.DefaultManager().SubmitYouTube(req.URL)
+	job, err := ingest.DefaultManager().SubmitYouTube(req.URL, req.ChatID, user.ID)
 	if err != nil {
 		log.Printf("[upload] failed to enqueue youtube job: %v", err)
 		trace.End("UPLOAD", "failed to enqueue youtube job")

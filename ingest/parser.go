@@ -1,6 +1,7 @@
 package ingest
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -11,15 +12,20 @@ import (
 	"strings"
 
 	"gin-backend/models"
+	"gin-backend/storage"
 )
 
-type Parser struct{}
-
-func NewParser() *Parser {
-	return &Parser{}
+type Parser struct {
+	cloudinary *storage.CloudinaryClient
 }
 
-func (p *Parser) StageFiles(files []*multipart.FileHeader) ([]models.StagedFile, error) {
+func NewParser() *Parser {
+	return &Parser{
+		cloudinary: storage.NewCloudinaryClient(),
+	}
+}
+
+func (p *Parser) StageFiles(files []*multipart.FileHeader, chatID string, userID string) ([]models.StagedFile, error) {
 	if err := os.MkdirAll("./temp", 0o755); err != nil {
 		return nil, err
 	}
@@ -46,21 +52,38 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader) ([]models.StagedFile,
 			return nil, err
 		}
 
+		cloudURL := ""
+		if p.cloudinary != nil && p.cloudinary.Enabled() {
+			payload, err := os.ReadFile(storedPath)
+			if err != nil {
+				return nil, err
+			}
+
+			uploadedURL, err := p.cloudinary.Upload(context.Background(), file.Filename, payload)
+			if err != nil {
+				return nil, err
+			}
+			cloudURL = uploadedURL
+		}
+
 		staged = append(staged, models.StagedFile{
 			FileID:        fileID,
 			OriginalName:  file.Filename,
 			StoredPath:    storedPath,
+			CloudURL:      cloudURL,
 			Size:          file.Size,
 			ContentType:   file.Header.Get("Content-Type"),
 			DetectedKind:  detectedKind,
 			OriginalOrder: index,
+			ChatID:        chatID,
+			UserID:        userID,
 		})
 	}
 
 	return staged, nil
 }
 
-func (p *Parser) StageYouTubeURL(rawURL string) ([]models.StagedFile, error) {
+func (p *Parser) StageYouTubeURL(rawURL string, chatID string, userID string) ([]models.StagedFile, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return nil, fmt.Errorf("youtube url is required")
@@ -79,6 +102,8 @@ func (p *Parser) StageYouTubeURL(rawURL string) ([]models.StagedFile, error) {
 			ContentType:   "text/url",
 			DetectedKind:  KindYouTube,
 			OriginalOrder: 0,
+			ChatID:        chatID,
+			UserID:        userID,
 		},
 	}
 

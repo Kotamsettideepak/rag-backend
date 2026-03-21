@@ -123,6 +123,8 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		Text:        documentText,
 		PageTexts:   pageTexts,
 		AudioChunks: mergedChunks,
+		ChatID:      staged.ChatID,
+		UserID:      staged.UserID,
 	}, nil
 }
 

@@ -169,6 +169,8 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		FileKind:  staged.DetectedKind,
 		Text:      documentText,
 		PageTexts: pageTexts,
+		ChatID:    staged.ChatID,
+		UserID:    staged.UserID,
 	}, nil
 }
 

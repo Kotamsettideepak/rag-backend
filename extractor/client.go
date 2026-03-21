@@ -126,6 +126,8 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		FileKind:  strings.TrimSpace(staged.DetectedKind),
 		Text:      buildDocumentText(staged, parsed.Elements),
 		PageTexts: buildPageTexts(staged, parsed.Elements),
+		ChatID:    staged.ChatID,
+		UserID:    staged.UserID,
 	}
 	log.Printf(
 		"[extractor] extracted file=%s elements=%d pages=%d text_chars=%d preview=%s",

@@ -14,6 +14,7 @@ import (
 	"gin-backend/db"
 	"gin-backend/embedding"
 	"gin-backend/models"
+	pgstore "gin-backend/store"
 	"gin-backend/trace"
 	"gin-backend/worker"
 )
@@ -83,9 +84,13 @@ func (m *Manager) Shutdown() {
 	m.pool.Shutdown()
 }
 
-func (m *Manager) SubmitUpload(files []*multipart.FileHeader) (*models.UploadJob, error) {
-	stagedFiles, err := m.parser.StageFiles(files)
+func (m *Manager) SubmitUpload(files []*multipart.FileHeader, chatID string, userID string) (*models.UploadJob, error) {
+	stagedFiles, err := m.parser.StageFiles(files, chatID, userID)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := recordUploads(context.Background(), stagedFiles); err != nil {
 		return nil, err
 	}
 
@@ -119,9 +124,13 @@ func (m *Manager) SubmitUpload(files []*multipart.FileHeader) (*models.UploadJob
 	return cloneJob(job), nil
 }
 
-func (m *Manager) SubmitYouTube(url string) (*models.UploadJob, error) {
-	stagedFiles, err := m.parser.StageYouTubeURL(url)
+func (m *Manager) SubmitYouTube(url string, chatID string, userID string) (*models.UploadJob, error) {
+	stagedFiles, err := m.parser.StageYouTubeURL(url, chatID, userID)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := recordUploads(context.Background(), stagedFiles); err != nil {
 		return nil, err
 	}
 
@@ -209,7 +218,7 @@ func (m *Manager) SubscribeJob(jobID string) (<-chan *models.UploadJob, func(), 
 	return updates, unsubscribe, nil
 }
 
-func (m *Manager) SearchContext(ctx context.Context, question string) (models.SearchContextResult, error) {
+func (m *Manager) SearchContext(ctx context.Context, question string, chatID string, userID string) (models.SearchContextResult, error) {
 	log.Printf("[search] question=%s", previewText(question, 220))
 	embeddingVector, err := m.embedder.EmbedQuery(ctx, question)
 	if err != nil {
@@ -217,7 +226,10 @@ func (m *Manager) SearchContext(ctx context.Context, question string) (models.Se
 	}
 	log.Printf("[search] question embedding dims=%d", len(embeddingVector))
 
-	matches, err := m.store.Search(embeddingVector, m.queryTopK)
+	matches, err := m.store.Search(embeddingVector, m.queryTopK, map[string]interface{}{
+		"chat_id": chatID,
+		"user_id": userID,
+	})
 	if err != nil {
 		return models.SearchContextResult{}, err
 	}
@@ -230,6 +242,29 @@ func (m *Manager) SearchContext(ctx context.Context, question string) (models.Se
 		previewText(result.Context, 320),
 	)
 	return result, nil
+}
+
+func recordUploads(ctx context.Context, stagedFiles []models.StagedFile) error {
+	pg := pgstore.DefaultStore()
+	if pg == nil {
+		return fmt.Errorf("database store is not initialized")
+	}
+
+	for _, file := range stagedFiles {
+		fileURL := strings.TrimSpace(file.CloudURL)
+		if fileURL == "" {
+			fileURL = strings.TrimSpace(file.SourceURL)
+		}
+		if fileURL == "" {
+			continue
+		}
+
+		if _, err := pg.CreateUpload(ctx, file.ChatID, fileURL, file.DetectedKind); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (m *Manager) ClearContext() error {

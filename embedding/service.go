@@ -63,6 +63,8 @@ func buildChunkMetadata(chunk models.Chunk) map[string]interface{} {
 		"file_id":    chunk.FileID,
 		"file_name":  chunk.FileName,
 		"file_kind":  chunk.FileKind,
+		"chat_id":    chunk.ChatID,
+		"user_id":    chunk.UserID,
 		"page":       chunk.Page,
 		"chunk_idx":  chunk.Index,
 		"chunk_hash": chunk.Hash,

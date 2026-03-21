@@ -10,6 +10,7 @@ import (
 
 	"gin-backend/ingest"
 	"gin-backend/llm"
+	"gin-backend/store"
 	"gin-backend/voice"
 
 	"github.com/gin-gonic/gin"
@@ -63,14 +64,41 @@ func VoiceChatHandler(c *gin.Context) {
 		return
 	}
 
-	contextResult, err := ingest.DefaultManager().SearchContext(ctx, question)
+	chatID := strings.TrimSpace(c.PostForm("chat_id"))
+	user, err := resolveCurrentUser(c)
+	if err != nil {
+		respondAuthError(c, err)
+		return
+	}
+	if chatID != "" {
+		if _, err := store.DefaultStore().GetChat(ctx, chatID, user.ID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
+			return
+		}
+		if _, err := store.DefaultStore().SaveMessage(ctx, chatID, "user", question); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save user message"})
+			return
+		}
+	}
+
+	contextResult, err := ingest.DefaultManager().SearchContext(ctx, question, chatID, user.ID)
 	if err != nil {
 		log.Printf("[voice] failed to search vector context: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to search for context"})
 		return
 	}
 
-	prompt := buildPrompt(contextResult.Modality, contextResult.Context, question)
+	conversationText := ""
+	if chatID != "" {
+		previousMessages, err := store.DefaultStore().ListMessages(ctx, chatID, 10)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load messages"})
+			return
+		}
+		conversationText = buildConversationContext(previousMessages)
+	}
+
+	prompt := buildPrompt(contextResult.Modality, contextResult.Context, conversationText, question)
 	answer, err := llm.NewGroqClient().GenerateResponse([]llm.Message{
 		{Role: "user", Content: prompt},
 	})
@@ -78,6 +106,13 @@ func VoiceChatHandler(c *gin.Context) {
 		log.Printf("[voice] groq response failed: %v", err)
 		c.JSON(http.StatusBadGateway, gin.H{"error": "failed to generate answer"})
 		return
+	}
+
+	if chatID != "" {
+		if _, err := store.DefaultStore().SaveMessage(ctx, chatID, "assistant", answer); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save assistant message"})
+			return
+		}
 	}
 
 	audioResponse, err := voiceClient.Synthesize(ctx, answer)

@@ -33,6 +33,7 @@ type addRequest struct {
 type queryRequest struct {
 	QueryEmbeddings [][]float64 `json:"query_embeddings"`
 	NResults        int         `json:"n_results"`
+	Where           interface{} `json:"where,omitempty"`
 }
 
 type queryResponse struct {
@@ -42,10 +43,10 @@ type queryResponse struct {
 }
 
 type getRequest struct {
-	Where   map[string]interface{} `json:"where,omitempty"`
-	Include []string               `json:"include,omitempty"`
-	Limit   int                    `json:"limit,omitempty"`
-	Offset  int                    `json:"offset,omitempty"`
+	Where   interface{} `json:"where,omitempty"`
+	Include []string    `json:"include,omitempty"`
+	Limit   int         `json:"limit,omitempty"`
+	Offset  int         `json:"offset,omitempty"`
 }
 
 type getResponse struct {
@@ -127,17 +128,19 @@ func (s *ChromaStore) AddRecords(records []models.VectorRecord) error {
 	return nil
 }
 
-func (s *ChromaStore) Search(embedding []float64, nResults int) ([]models.SearchMatch, error) {
+func (s *ChromaStore) Search(embedding []float64, nResults int, where map[string]interface{}) ([]models.SearchMatch, error) {
 	collectionID, err := s.getCollectionID()
 	if err != nil {
 		return nil, err
 	}
 
+	normalizedWhere := normalizeWhereClause(where)
 	req := queryRequest{
 		QueryEmbeddings: [][]float64{embedding},
 		NResults:        nResults,
+		Where:           normalizedWhere,
 	}
-	log.Printf("[chroma] query collection=%s n_results=%d embedding_dims=%d", collectionName, nResults, len(embedding))
+	log.Printf("[chroma] query collection=%s n_results=%d embedding_dims=%d where=%v normalized_where=%v", collectionName, nResults, len(embedding), where, normalizedWhere)
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -189,13 +192,14 @@ func (s *ChromaStore) GetByMetadata(where map[string]interface{}, limit int) ([]
 		return nil, err
 	}
 
+	normalizedWhere := normalizeWhereClause(where)
 	req := getRequest{
-		Where:   where,
+		Where:   normalizedWhere,
 		Include: []string{"documents", "metadatas"},
 		Limit:   limit,
 		Offset:  0,
 	}
-	log.Printf("[chroma] get by metadata collection=%s where=%v limit=%d", collectionName, where, limit)
+	log.Printf("[chroma] get by metadata collection=%s where=%v normalized_where=%v limit=%d", collectionName, where, normalizedWhere, limit)
 
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -503,4 +507,33 @@ func firstMatchPreview(matches []models.SearchMatch) string {
 		return text
 	}
 	return text[:180] + "..."
+}
+
+func normalizeWhereClause(where map[string]interface{}) interface{} {
+	if len(where) == 0 {
+		return nil
+	}
+
+	if len(where) == 1 {
+		for key, value := range where {
+			return map[string]interface{}{
+				key: map[string]interface{}{
+					"$eq": value,
+				},
+			}
+		}
+	}
+
+	clauses := make([]map[string]interface{}, 0, len(where))
+	for key, value := range where {
+		clauses = append(clauses, map[string]interface{}{
+			key: map[string]interface{}{
+				"$eq": value,
+			},
+		})
+	}
+
+	return map[string]interface{}{
+		"$and": clauses,
+	}
 }
