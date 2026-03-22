@@ -25,6 +25,8 @@ func RegisterRoutes(r *gin.Engine) {
 	r.POST("/chat/create", api.CreateChatHandler)
 	r.GET("/chat/list", api.ListChatsHandler)
 	r.GET("/chat/:chat_id/messages", api.ChatMessagesHandler)
+	r.GET("/chat/:chat_id/uploads", api.ChatUploadsHandler)
+	r.DELETE("/chat/:chat_id", api.DeleteChatHandler)
 	r.POST("/chat", api.ChatHandler)
 	r.POST("/voice/chat", api.VoiceChatHandler)
 	r.GET("/ws", api.ChatWebSocketHandler)

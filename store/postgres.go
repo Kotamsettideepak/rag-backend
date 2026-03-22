@@ -184,6 +184,20 @@ func (s *Store) GetChat(ctx context.Context, chatID string, userID string) (Chat
 	return chat, nil
 }
 
+func (s *Store) DeleteChat(ctx context.Context, chatID string, userID string) error {
+	result := s.db.WithContext(ctx).
+		Where("id = ? AND user_id = ?", chatID, userID).
+		Delete(&Chat{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("chat not found")
+	}
+
+	return nil
+}
+
 func (s *Store) SaveMessage(ctx context.Context, chatID string, role string, content string) (Message, error) {
 	role = strings.TrimSpace(role)
 	content = strings.TrimSpace(content)

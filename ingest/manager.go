@@ -271,6 +271,13 @@ func (m *Manager) ClearContext() error {
 	return m.store.ClearCollection()
 }
 
+func (m *Manager) DeleteChatContext(chatID string, userID string) error {
+	return m.store.DeleteByMetadata(map[string]interface{}{
+		"chat_id": chatID,
+		"user_id": userID,
+	})
+}
+
 func (m *Manager) runJobWorker(ctx context.Context, workerID int) {
 	defer m.wg.Done()
 

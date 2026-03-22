@@ -169,6 +169,63 @@ func ChatMessagesHandler(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"messages": messages})
 }
 
+func ChatUploadsHandler(c *gin.Context) {
+	chatID := strings.TrimSpace(c.Param("chat_id"))
+	if chatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is required"})
+		return
+	}
+
+	user, err := resolveCurrentUser(c)
+	if err != nil {
+		respondAuthError(c, err)
+		return
+	}
+	if _, err := store.DefaultStore().GetChat(c.Request.Context(), chatID, user.ID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
+		return
+	}
+
+	uploads, err := store.DefaultStore().ListUserUploadedData(c.Request.Context(), chatID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load uploads"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"uploads": uploads})
+}
+
+func DeleteChatHandler(c *gin.Context) {
+	chatID := strings.TrimSpace(c.Param("chat_id"))
+	if chatID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id is required"})
+		return
+	}
+
+	user, err := resolveCurrentUser(c)
+	if err != nil {
+		respondAuthError(c, err)
+		return
+	}
+
+	if _, err := store.DefaultStore().GetChat(c.Request.Context(), chatID, user.ID); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
+		return
+	}
+
+	if err := ingest.DefaultManager().DeleteChatContext(chatID, user.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete chat context"})
+		return
+	}
+
+	if err := store.DefaultStore().DeleteChat(c.Request.Context(), chatID, user.ID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete chat"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Chat deleted successfully"})
+}
+
 func previewText(text string, limit int) string {
 	text = strings.Join(strings.Fields(strings.TrimSpace(text)), " ")
 	if limit <= 0 || len(text) <= limit {

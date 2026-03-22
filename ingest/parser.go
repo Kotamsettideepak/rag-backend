@@ -30,6 +30,10 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader, chatID string, userID
 		return nil, err
 	}
 
+	if p.cloudinary == nil || !p.cloudinary.Enabled() {
+		log.Printf("[parser] cloudinary is not configured; uploaded files will not have cloud urls")
+	}
+
 	staged := make([]models.StagedFile, 0, len(files))
 	for index, file := range files {
 		detectedKind := detectKind(file.Filename, file.Header.Get("Content-Type"))

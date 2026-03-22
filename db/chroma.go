@@ -55,6 +55,10 @@ type getResponse struct {
 	Metadatas []map[string]interface{} `json:"metadatas"`
 }
 
+type deleteRequest struct {
+	Where interface{} `json:"where,omitempty"`
+}
+
 func NewChromaStore() *ChromaStore {
 	return &ChromaStore{
 		client: &http.Client{
@@ -307,6 +311,45 @@ func (s *ChromaStore) ClearCollection() error {
 	}
 
 	s.cachedCollection = ""
+	return nil
+}
+
+func (s *ChromaStore) DeleteByMetadata(where map[string]interface{}) error {
+	collectionID, err := s.getCollectionID()
+	if err != nil {
+		return err
+	}
+
+	normalizedWhere := normalizeWhereClause(where)
+	req := deleteRequest{
+		Where: normalizedWhere,
+	}
+	log.Printf("[chroma] delete by metadata collection=%s where=%v normalized_where=%v", collectionName, where, normalizedWhere)
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+
+	url := fmt.Sprintf(
+		"%s/api/v2/tenants/%s/databases/%s/collections/%s/delete",
+		config.GetChromaBaseURL(),
+		config.GetChromaTenant(),
+		config.GetChromaDatabase(),
+		collectionID,
+	)
+
+	resp, err := s.doRequest(http.MethodPost, url, body)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	responseBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("chroma delete failed with status %d: %s", resp.StatusCode, string(responseBody))
+	}
+
 	return nil
 }
 
