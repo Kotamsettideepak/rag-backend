@@ -226,7 +226,10 @@ func (m *Manager) SearchContext(ctx context.Context, question string, chatID str
 	}
 	log.Printf("[search] question embedding dims=%d", len(embeddingVector))
 
-	matches, err := m.store.Search(embeddingVector, m.queryTopK, map[string]interface{}{
+	complexity, topK := m.resolveQueryTopK(question)
+	log.Printf("[search] complexity=%s top_k=%d", complexity, topK)
+
+	matches, err := m.store.Search(embeddingVector, topK, map[string]interface{}{
 		"chat_id": chatID,
 		"user_id": userID,
 	})
@@ -242,6 +245,56 @@ func (m *Manager) SearchContext(ctx context.Context, question string, chatID str
 		previewText(result.Context, 320),
 	)
 	return result, nil
+}
+
+func (m *Manager) resolveQueryTopK(question string) (string, int) {
+	normalized := strings.ToLower(strings.TrimSpace(question))
+	if normalized == "" {
+		return "simple", clampTopK(4, m.queryTopK)
+	}
+
+	wordCount := len(strings.Fields(normalized))
+	complexityScore := 0
+
+	if wordCount >= 7 {
+		complexityScore++
+	}
+	if wordCount >= 14 {
+		complexityScore++
+	}
+
+	complexitySignals := []string{
+		"why", "how", "explain", "compare", "difference", "summarize", "summary",
+		"relationship", "relationships", "analyze", "analysis", "describe", "details",
+		"step by step", "based on", "evidence", "context", "overall", "multiple",
+	}
+	for _, signal := range complexitySignals {
+		if strings.Contains(normalized, signal) {
+			complexityScore++
+		}
+	}
+
+	switch {
+	case complexityScore >= 3:
+		return "complex", clampTopK(10, m.queryTopK)
+	case complexityScore >= 1:
+		return "medium", clampTopK(7, m.queryTopK)
+	default:
+		return "simple", clampTopK(4, m.queryTopK)
+	}
+}
+
+func clampTopK(desired int, fallback int) int {
+	if desired <= 0 {
+		desired = 1
+	}
+	if fallback <= 0 {
+		fallback = desired
+	}
+	if desired > fallback {
+		return fallback
+	}
+	return desired
 }
 
 func recordUploads(ctx context.Context, stagedFiles []models.StagedFile) error {

@@ -72,14 +72,23 @@ func ChatHandler(c *gin.Context) {
 		return
 	}
 
-	previousMessages, err := store.DefaultStore().ListMessages(ctx, req.ChatID, 10)
+	previousMessages, err := store.DefaultStore().ListMessages(ctx, req.ChatID, recentContextMessages)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load message history"})
 		return
 	}
+	logChatMessages("[chat]", req.ChatID, previousMessages)
+
+	uploads, err := store.DefaultStore().ListUserUploadedData(ctx, req.ChatID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load uploaded data"})
+		return
+	}
+	logUploadedData("[chat]", req.ChatID, uploads)
 
 	log.Printf("[chat] context modality=%s", contextResult.Modality)
 	log.Printf("[chat] context preview=%s", previewText(contextResult.Context, 320))
+	log.Printf("[chat] context chars=%d", len(contextResult.Context))
 	prompt := buildPrompt(contextResult.Modality, contextResult.Context, buildConversationContext(previousMessages), req.Message)
 	log.Printf("[chat] sending to llm provider=Groq model=%s prompt_preview=%s", llm.CurrentGroqModel(), previewText(prompt, 420))
 
@@ -250,4 +259,32 @@ func buildConversationContext(messages []store.Message) string {
 	}
 
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func logChatMessages(prefix string, chatID string, messages []store.Message) {
+	log.Printf("%s db messages chat_id=%s count=%d", prefix, chatID, len(messages))
+	for index, message := range messages {
+		log.Printf(
+			"%s db message[%d] role=%s created_at=%s preview=%s",
+			prefix,
+			index,
+			strings.TrimSpace(message.Role),
+			message.CreatedAt.Format(time.RFC3339),
+			previewText(message.Content, 180),
+		)
+	}
+}
+
+func logUploadedData(prefix string, chatID string, uploads []store.UserUploadedData) {
+	log.Printf("%s uploaded data chat_id=%s count=%d", prefix, chatID, len(uploads))
+	for index, upload := range uploads {
+		log.Printf(
+			"%s uploaded[%d] file_type=%s original_name=%s url=%s",
+			prefix,
+			index,
+			strings.TrimSpace(upload.FileType),
+			strings.TrimSpace(upload.OriginalFileName),
+			previewText(upload.FileURL, 200),
+		)
+	}
 }

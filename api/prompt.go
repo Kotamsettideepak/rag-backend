@@ -10,6 +10,7 @@ const (
 	contextModalityAudio = "audio"
 	contextModalityImage = "image"
 	contextModalityMixed = "mixed"
+	recentContextMessages = 5
 	maxConversationChars = 3000
 	maxContextChars      = 9000
 	maxQuestionChars     = 1000

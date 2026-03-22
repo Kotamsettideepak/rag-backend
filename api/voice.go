@@ -90,13 +90,21 @@ func VoiceChatHandler(c *gin.Context) {
 
 	conversationText := ""
 	if chatID != "" {
-		previousMessages, err := store.DefaultStore().ListMessages(ctx, chatID, 10)
+		previousMessages, err := store.DefaultStore().ListMessages(ctx, chatID, recentContextMessages)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load messages"})
 			return
 		}
+		logChatMessages("[voice]", chatID, previousMessages)
+		uploads, err := store.DefaultStore().ListUserUploadedData(ctx, chatID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load uploaded data"})
+			return
+		}
+		logUploadedData("[voice]", chatID, uploads)
 		conversationText = buildConversationContext(previousMessages)
 	}
+	log.Printf("[voice] context modality=%s chars=%d preview=%s", contextResult.Modality, len(contextResult.Context), previewText(contextResult.Context, 320))
 
 	prompt := buildPrompt(contextResult.Modality, contextResult.Context, conversationText, question)
 	answer, err := llm.NewGroqClient().GenerateResponse([]llm.Message{

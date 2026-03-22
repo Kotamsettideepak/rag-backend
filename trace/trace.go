@@ -24,7 +24,7 @@ func separator(label string, scope string, details string) string {
 		core += fmt.Sprintf("| %s ", strings.TrimSpace(details))
 	}
 
-	width := 120
+	width := 160
 	if len(core) >= width {
 		return core
 	}

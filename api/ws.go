@@ -92,10 +92,17 @@ func streamChatResponse(conn *websocket.Conn, chatID string, question string) er
 	}
 
 	log.Printf("[ws] context modality=%s", contextResult.Modality)
-	previousMessages, err := store.DefaultStore().ListMessages(ctx, chatID, 10)
+	previousMessages, err := store.DefaultStore().ListMessages(ctx, chatID, recentContextMessages)
 	if err != nil {
 		return fmt.Errorf("failed to load messages: %w", err)
 	}
+	logChatMessages("[ws]", chatID, previousMessages)
+	uploads, err := store.DefaultStore().ListUserUploadedData(ctx, chatID)
+	if err != nil {
+		return fmt.Errorf("failed to load uploaded data: %w", err)
+	}
+	logUploadedData("[ws]", chatID, uploads)
+	log.Printf("[ws] context chars=%d preview=%s", len(contextResult.Context), previewText(contextResult.Context, 320))
 	prompt := buildPrompt(contextResult.Modality, contextResult.Context, buildConversationContext(previousMessages), question)
 
 	client := llm.NewGroqClient()
