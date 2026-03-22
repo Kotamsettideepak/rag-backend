@@ -37,13 +37,18 @@ type Message struct {
 	Chat      Chat      `gorm:"foreignKey:ChatID;constraint:OnDelete:CASCADE" json:"-"`
 }
 
-type Upload struct {
-	ID        string    `gorm:"type:uuid;primaryKey" json:"id"`
-	ChatID    string    `gorm:"type:uuid;not null;index:idx_uploads_chat_created,priority:1" json:"chat_id"`
-	FileURL   string    `gorm:"type:text;not null" json:"file_url"`
-	FileType  string    `gorm:"type:text;not null" json:"file_type"`
-	CreatedAt time.Time `gorm:"index:idx_uploads_chat_created,priority:2" json:"created_at"`
-	Chat      Chat      `gorm:"foreignKey:ChatID;constraint:OnDelete:CASCADE" json:"-"`
+type UserUploadedData struct {
+	ID               string    `gorm:"type:uuid;primaryKey" json:"id"`
+	ChatID           string    `gorm:"type:uuid;not null;index:idx_uploaded_data_chat_created,priority:1" json:"chat_id"`
+	FileURL          string    `gorm:"type:text;not null" json:"file_url"`
+	FileType         string    `gorm:"type:text;not null" json:"file_type"`
+	OriginalFileName string    `gorm:"type:text" json:"original_file_name"`
+	CreatedAt        time.Time `gorm:"index:idx_uploaded_data_chat_created,priority:2" json:"created_at"`
+	Chat             Chat      `gorm:"foreignKey:ChatID;constraint:OnDelete:CASCADE" json:"-"`
+}
+
+func (UserUploadedData) TableName() string {
+	return "user_uploaded_data"
 }
 
 type Store struct {
@@ -99,7 +104,7 @@ func (s *Store) Close() {
 }
 
 func (s *Store) AutoMigrate(ctx context.Context) error {
-	return s.db.WithContext(ctx).AutoMigrate(&User{}, &Chat{}, &Message{}, &Upload{})
+	return s.db.WithContext(ctx).AutoMigrate(&User{}, &Chat{}, &Message{}, &UserUploadedData{})
 }
 
 func (s *Store) EnsureUserByEmail(ctx context.Context, email string) (User, error) {
@@ -221,16 +226,30 @@ func (s *Store) ListMessages(ctx context.Context, chatID string, limit int) ([]M
 	return recent, nil
 }
 
-func (s *Store) CreateUpload(ctx context.Context, chatID string, fileURL string, fileType string) (Upload, error) {
-	upload := Upload{
-		ID:       uuid.NewString(),
-		ChatID:   chatID,
-		FileURL:  strings.TrimSpace(fileURL),
-		FileType: strings.TrimSpace(fileType),
+func (s *Store) CreateUserUploadedData(ctx context.Context, chatID string, fileURL string, fileType string, originalFileName string) (UserUploadedData, error) {
+	uploaded := UserUploadedData{
+		ID:               uuid.NewString(),
+		ChatID:           chatID,
+		FileURL:          strings.TrimSpace(fileURL),
+		FileType:         strings.TrimSpace(fileType),
+		OriginalFileName: strings.TrimSpace(originalFileName),
 	}
-	if err := s.db.WithContext(ctx).Create(&upload).Error; err != nil {
-		return Upload{}, err
+	if err := s.db.WithContext(ctx).Create(&uploaded).Error; err != nil {
+		return UserUploadedData{}, err
 	}
 
-	return upload, nil
+	return uploaded, nil
+}
+
+func (s *Store) ListUserUploadedData(ctx context.Context, chatID string) ([]UserUploadedData, error) {
+	var uploaded []UserUploadedData
+	err := s.db.WithContext(ctx).
+		Where("chat_id = ?", chatID).
+		Order("created_at ASC").
+		Find(&uploaded).Error
+	if err != nil {
+		return nil, err
+	}
+
+	return uploaded, nil
 }

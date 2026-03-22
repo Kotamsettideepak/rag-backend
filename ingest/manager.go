@@ -259,7 +259,7 @@ func recordUploads(ctx context.Context, stagedFiles []models.StagedFile) error {
 			continue
 		}
 
-		if _, err := pg.CreateUpload(ctx, file.ChatID, fileURL, file.DetectedKind); err != nil {
+		if _, err := pg.CreateUserUploadedData(ctx, file.ChatID, fileURL, file.DetectedKind, file.OriginalName); err != nil {
 			return err
 		}
 	}

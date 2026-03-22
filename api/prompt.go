@@ -10,12 +10,20 @@ const (
 	contextModalityAudio = "audio"
 	contextModalityImage = "image"
 	contextModalityMixed = "mixed"
+	maxConversationChars = 3000
+	maxContextChars      = 9000
+	maxQuestionChars     = 1000
 )
 
-func buildPrompt(modality string, contextText string, question string) string {
+func buildPrompt(modality string, contextText string, conversationText string, question string) string {
+	conversationText = clampPromptSection(conversationText, maxConversationChars)
+	contextText = clampPromptSection(contextText, maxContextChars)
+	question = clampPromptSection(question, maxQuestionChars)
+
 	sections := []string{
 		"You are answering questions only from the uploaded content.",
 		fmt.Sprintf("Context modality: %s", normalizeModality(modality)),
+		fmt.Sprintf("Conversation history:\n%s", strings.TrimSpace(conversationText)),
 		fmt.Sprintf("Retrieved context:\n%s", strings.TrimSpace(contextText)),
 		fmt.Sprintf("User question:\n%s", strings.TrimSpace(question)),
 		"Instructions:\n" + buildInstructionBlock(modality),
@@ -74,4 +82,24 @@ func normalizeModality(modality string) string {
 	default:
 		return contextModalityMixed
 	}
+}
+
+func clampPromptSection(text string, limit int) string {
+	text = strings.TrimSpace(text)
+	if limit <= 0 || len(text) <= limit {
+		return text
+	}
+
+	cutoff := strings.LastIndex(text[:limit], "\n\n")
+	if cutoff < limit/2 {
+		cutoff = strings.LastIndex(text[:limit], "\n")
+	}
+	if cutoff < limit/2 {
+		cutoff = strings.LastIndex(text[:limit], ". ")
+	}
+	if cutoff < limit/2 {
+		cutoff = limit
+	}
+
+	return strings.TrimSpace(text[:cutoff]) + "\n\n[Context truncated for model size.]"
 }
