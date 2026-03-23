@@ -1,47 +1,26 @@
 package config
 
 import (
+	"fmt"
 	"net/url"
 	"os"
 	"strings"
 )
 
-const defaultExtractorBaseURL = "http://127.0.0.1:8090"
-const defaultExtractorBindHost = "127.0.0.1"
-const defaultExtractorPort = "8090"
-
 func GetExtractorBaseURL() string {
-	baseURL := strings.TrimSpace(os.Getenv("EXTRACTOR_BASE_URL"))
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("EXTRACTOR_BASE_URL")), "/")
+}
+
+func ValidateExtractorConfig() error {
+	baseURL := GetExtractorBaseURL()
 	if baseURL == "" {
-		return defaultExtractorBaseURL
-	}
-	return strings.TrimRight(baseURL, "/")
-}
-
-func GetExtractorBindHost() string {
-	host := strings.TrimSpace(os.Getenv("EXTRACTOR_BIND_HOST"))
-	if host != "" {
-		return host
+		return fmt.Errorf("EXTRACTOR_BASE_URL is required")
 	}
 
-	parsed, err := url.Parse(GetExtractorBaseURL())
-	if err == nil && parsed.Hostname() != "" {
-		return parsed.Hostname()
+	parsed, err := url.Parse(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return fmt.Errorf("EXTRACTOR_BASE_URL must be a valid absolute URL")
 	}
 
-	return defaultExtractorBindHost
-}
-
-func GetExtractorPort() string {
-	port := strings.TrimSpace(os.Getenv("EXTRACTOR_PORT"))
-	if port != "" {
-		return port
-	}
-
-	parsed, err := url.Parse(GetExtractorBaseURL())
-	if err == nil && parsed.Port() != "" {
-		return parsed.Port()
-	}
-
-	return defaultExtractorPort
+	return nil
 }

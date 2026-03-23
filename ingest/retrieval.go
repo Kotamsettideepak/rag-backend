@@ -45,6 +45,11 @@ func buildSearchContextResult(question string, matches []models.SearchMatch, sto
 				Context:  buildOrderedAudioTranscriptContext(fileScopedMatches),
 				Modality: searchModalityAudio,
 			}
+		case audioQuerySummary:
+			return models.SearchContextResult{
+				Context:  buildAudioSummaryContext(fileScopedMatches),
+				Modality: searchModalityAudio,
+			}
 		default:
 			return models.SearchContextResult{
 				Context:  buildAudioSemanticContext(fileScopedMatches, matches),
@@ -95,6 +100,7 @@ const (
 	audioQuerySemantic audioQueryIntent = iota
 	audioQueryMetadata
 	audioQueryLyrics
+	audioQuerySummary
 )
 
 func classifyAudioQuery(question string) audioQueryIntent {
@@ -104,6 +110,20 @@ func classifyAudioQuery(question string) audioQueryIntent {
 	for _, keyword := range lyricsKeywords {
 		if strings.Contains(lower, keyword) {
 			return audioQueryLyrics
+		}
+	}
+
+	summaryKeywords := []string{
+		"what is the song about", "what's the song about", "whats the song about",
+		"what is this song about", "what's this song about", "whats this song about",
+		"meaning of the song", "song meaning", "theme of the song", "main theme",
+		"summarize the song", "summary of the song", "what does this song mean",
+		"what does the song mean", "message of the song", "story of the song",
+		"about this song", "about the song",
+	}
+	for _, keyword := range summaryKeywords {
+		if strings.Contains(lower, keyword) {
+			return audioQuerySummary
 		}
 	}
 
@@ -137,6 +157,30 @@ func buildOrderedAudioTranscriptContext(matches []models.SearchMatch) string {
 
 	sortAudioMatches(transcriptMatches)
 	return joinMatchDocuments(uniqueMatches(transcriptMatches))
+}
+
+func buildAudioSummaryContext(matches []models.SearchMatch) string {
+	metadataMatches := filterMatchesByContentType(matches, "audio_metadata")
+	transcriptMatches := filterMatchesByContentType(matches, "audio_transcript")
+	if len(transcriptMatches) == 0 {
+		return joinMatchDocuments(matches)
+	}
+
+	sortAudioMatches(transcriptMatches)
+
+	contextParts := make([]string, 0, len(transcriptMatches)+2)
+	if len(metadataMatches) > 0 {
+		contextParts = append(contextParts, metadataMatches[0].Document)
+	}
+	contextParts = append(
+		contextParts,
+		"Use the full ordered transcript below to answer high-level questions about the song's meaning, theme, mood, or story. Base the answer on the overall progression of the lyrics, not on a single isolated line.",
+	)
+	for _, match := range uniqueMatches(transcriptMatches) {
+		contextParts = append(contextParts, match.Document)
+	}
+
+	return strings.TrimSpace(strings.Join(contextParts, "\n\n"))
 }
 
 func buildAudioSemanticContext(audioMatches []models.SearchMatch, original []models.SearchMatch) string {

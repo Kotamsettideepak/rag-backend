@@ -6,14 +6,14 @@ import (
 )
 
 const (
-	contextModalityPDF   = "pdf"
-	contextModalityAudio = "audio"
-	contextModalityImage = "image"
-	contextModalityMixed = "mixed"
+	contextModalityPDF    = "pdf"
+	contextModalityAudio  = "audio"
+	contextModalityImage  = "image"
+	contextModalityMixed  = "mixed"
 	recentContextMessages = 5
-	maxConversationChars = 3000
-	maxContextChars      = 9000
-	maxQuestionChars     = 1000
+	maxConversationChars  = 3000
+	maxContextChars       = 9000
+	maxQuestionChars      = 1000
 )
 
 func buildPrompt(modality string, contextText string, conversationText string, question string) string {
@@ -49,6 +49,8 @@ func buildInstructionBlock(modality string) string {
 			"- Timestamp ranges like [12.50s - 18.20s] are transcript positions, not independent total durations.",
 			"- Do not infer the full duration of an audio file from a single transcript segment.",
 			"- If the user asks for complete lyrics or a complete transcript and the context only contains partial excerpts, clearly say the retrieved context is incomplete.",
+			"- For questions about what a song is about, its meaning, theme, mood, or story, synthesize the overall transcript instead of relying on one isolated lyric line.",
+			"- When answering high-level song questions, summarize in plain language first and use short lyric references only as supporting evidence.",
 		}
 	case contextModalityPDF:
 		modalityRules = []string{

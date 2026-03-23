@@ -32,10 +32,9 @@ func main() {
 	if err := config.EnsureChromaRunning(); err != nil {
 		log.Fatalf("[startup] failed to ensure chroma is running: %v", err)
 	}
-	if err := config.EnsureExtractorRunning(); err != nil {
-		log.Fatalf("[startup] failed to ensure extractor is running: %v", err)
+	if err := config.ValidateExtractorConfig(); err != nil {
+		log.Fatalf("[startup] invalid extractor config: %v", err)
 	}
-	defer config.ShutdownExtractorIfStarted()
 
 	if err := store.InitDefaultStore(context.Background()); err != nil {
 		log.Fatalf("[startup] failed to initialize postgres store: %v", err)
