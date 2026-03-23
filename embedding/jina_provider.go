@@ -8,16 +8,18 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 
 	"gin-backend/config"
 )
 
 type JinaEmbeddingRepository struct {
-	apiKey     string
+	apiKeys    []string
 	baseURL    string
 	model      string
 	task       string
 	httpClient *http.Client
+	nextKey    atomic.Uint64
 }
 
 type jinaRequest struct {
@@ -33,9 +35,9 @@ type jinaResponse struct {
 	} `json:"data"`
 }
 
-func NewJinaEmbeddingRepository(apiKey string) *JinaEmbeddingRepository {
+func NewJinaEmbeddingRepository(apiKeys []string) *JinaEmbeddingRepository {
 	return &JinaEmbeddingRepository{
-		apiKey:  apiKey,
+		apiKeys: append([]string(nil), apiKeys...),
 		baseURL: config.GetJinaBaseURL(),
 		model:   config.GetJinaModel(),
 		task:    config.GetJinaTask(),
@@ -49,7 +51,8 @@ func (r *JinaEmbeddingRepository) Embed(ctx context.Context, texts []string) ([]
 	if len(texts) == 0 {
 		return nil, nil
 	}
-	if strings.TrimSpace(r.apiKey) == "" {
+	apiKey := r.pickAPIKey()
+	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("jina api key is not configured")
 	}
 
@@ -71,7 +74,7 @@ func (r *JinaEmbeddingRepository) Embed(ctx context.Context, texts []string) ([]
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+r.apiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	resp, err := r.httpClient.Do(req)
 	if err != nil {
@@ -107,4 +110,12 @@ func (r *JinaEmbeddingRepository) Embed(ctx context.Context, texts []string) ([]
 	}
 
 	return embeddings, nil
+}
+
+func (r *JinaEmbeddingRepository) pickAPIKey() string {
+	if len(r.apiKeys) == 0 {
+		return ""
+	}
+	index := r.nextKey.Add(1) - 1
+	return r.apiKeys[index%uint64(len(r.apiKeys))]
 }

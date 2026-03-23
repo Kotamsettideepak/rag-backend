@@ -42,6 +42,8 @@ type queuedJob struct {
 	Files []models.StagedFile
 }
 
+const maxPDFPages = 300
+
 func NewManager(embedder *embedding.Service) *Manager {
 	manager := &Manager{
 		parser:         NewParser(),
@@ -87,10 +89,6 @@ func (m *Manager) SubmitUpload(files []*multipart.FileHeader, chatID string, use
 		return nil, err
 	}
 
-	if err := recordUploads(context.Background(), stagedFiles); err != nil {
-		return nil, err
-	}
-
 	jobID := generateID()
 	now := time.Now().UTC()
 
@@ -128,10 +126,6 @@ func (m *Manager) SubmitUpload(files []*multipart.FileHeader, chatID string, use
 func (m *Manager) SubmitYouTube(url string, chatID string, userID string) (*models.UploadJob, error) {
 	stagedFiles, err := m.parser.StageYouTubeURL(url, chatID, userID)
 	if err != nil {
-		return nil, err
-	}
-
-	if err := recordUploads(context.Background(), stagedFiles); err != nil {
 		return nil, err
 	}
 
@@ -394,6 +388,11 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 			m.failJob(queued.ID, fmt.Errorf("extract failed for %s: %w", file.OriginalName, err))
 			return
 		}
+		if err := validateDocumentLimits(document); err != nil {
+			trace.End("INGEST", "validation failed file="+file.OriginalName)
+			m.failJob(queued.ID, err)
+			return
+		}
 
 		documents = append(documents, document)
 		log.Printf(
@@ -418,6 +417,19 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		})
 	}
 	parseDuration := time.Since(parseStart)
+
+	for index := range queued.Files {
+		if err := m.parser.AttachCloudURL(ctx, &queued.Files[index]); err != nil {
+			trace.End("INGEST", "cloud upload failed file="+queued.Files[index].OriginalName)
+			m.failJob(queued.ID, fmt.Errorf("cloud upload failed for %s: %w", queued.Files[index].OriginalName, err))
+			return
+		}
+	}
+	if err := recordUploads(ctx, queued.Files); err != nil {
+		trace.End("INGEST", "record uploads failed")
+		m.failJob(queued.ID, err)
+		return
+	}
 
 	chunkStart := time.Now()
 	allChunks := make([]models.Chunk, 0)
@@ -908,4 +920,11 @@ func maxInt(left int, right int) int {
 		return left
 	}
 	return right
+}
+
+func validateDocumentLimits(document models.ParsedDocument) error {
+	if document.FileKind == KindPDF && len(document.PageTexts) > maxPDFPages {
+		return fmt.Errorf("%s has %d pages. PDFs over %d pages are not allowed", document.FileName, len(document.PageTexts), maxPDFPages)
+	}
+	return nil
 }

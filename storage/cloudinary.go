@@ -10,6 +10,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ type CloudinaryClient struct {
 type cloudinaryUploadResponse struct {
 	SecureURL string `json:"secure_url"`
 }
+
+var invalidPublicIDChars = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
 func NewCloudinaryClient() *CloudinaryClient {
 	return &CloudinaryClient{
@@ -49,11 +52,10 @@ func (c *CloudinaryClient) Upload(ctx context.Context, fileName string, payload 
 	}
 
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
-	publicID := strings.Trim(filepath.Base(fileName), ".")
+	publicID := sanitizePublicID(filepath.Base(fileName))
 	if publicID == "" {
 		publicID = "upload"
 	}
-	publicID = strings.ReplaceAll(publicID, " ", "_")
 	folder := strings.TrimSpace(c.folder)
 
 	signatureBase := "folder=" + folder + "&public_id=" + publicID + "&timestamp=" + timestamp + c.apiSecret
@@ -119,4 +121,15 @@ func (c *CloudinaryClient) Upload(ctx context.Context, fileName string, payload 
 	}
 
 	return parsed.SecureURL, nil
+}
+
+func sanitizePublicID(fileName string) string {
+	publicID := strings.TrimSpace(strings.Trim(filepath.Base(fileName), "."))
+	publicID = strings.ReplaceAll(publicID, " ", "_")
+	publicID = invalidPublicIDChars.ReplaceAllString(publicID, "_")
+	publicID = strings.Trim(publicID, "._-")
+	if publicID == "" {
+		return "upload"
+	}
+	return publicID
 }

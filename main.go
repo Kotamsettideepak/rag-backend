@@ -60,12 +60,12 @@ func main() {
 	}
 	defer store.DefaultStore().Close()
 
-	apiKey := config.GetJinaAPIKey()
-	if apiKey == "" {
-		log.Fatal("[startup] JINA_API_KEY is required")
+	apiKeys := config.GetJinaAPIKeys()
+	if len(apiKeys) == 0 {
+		log.Fatal("[startup] at least one JINA_API_KEY is required")
 	}
 
-	embeddingRepo := embedding.NewJinaEmbeddingRepository(apiKey)
+	embeddingRepo := embedding.NewJinaEmbeddingRepository(apiKeys)
 	embeddingService := embedding.NewService(embeddingRepo)
 	manager := ingest.NewManager(embeddingService)
 	ingest.SetDefaultManager(manager)

@@ -80,7 +80,7 @@ func UploadHandler(c *gin.Context) {
 	if err != nil {
 		log.Printf("[upload] failed to enqueue ingestion job: %v", err)
 		trace.End("UPLOAD", "failed to enqueue job")
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	trace.End("UPLOAD", "accepted job_id="+job.ID)

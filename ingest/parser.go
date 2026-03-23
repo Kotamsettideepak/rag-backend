@@ -35,6 +35,7 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader, chatID string, userID
 	}
 
 	staged := make([]models.StagedFile, 0, len(files))
+	pdfCount := 0
 	for index, file := range files {
 		detectedKind := detectKind(file.Filename, file.Header.Get("Content-Type"))
 		log.Printf(
@@ -47,6 +48,12 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader, chatID string, userID
 		if !isSupportedKind(detectedKind) {
 			return nil, fmt.Errorf("only PDF, audio, and image files are supported right now: %s", file.Filename)
 		}
+		if detectedKind == KindPDF {
+			pdfCount++
+			if pdfCount > 1 {
+				return nil, fmt.Errorf("only one PDF can be uploaded at a time")
+			}
+		}
 
 		fileID := generateID()
 		storedName := fileID + "_" + sanitizeFilename(file.Filename)
@@ -56,25 +63,10 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader, chatID string, userID
 			return nil, err
 		}
 
-		cloudURL := ""
-		if p.cloudinary != nil && p.cloudinary.Enabled() {
-			payload, err := os.ReadFile(storedPath)
-			if err != nil {
-				return nil, err
-			}
-
-			uploadedURL, err := p.cloudinary.Upload(context.Background(), file.Filename, payload)
-			if err != nil {
-				return nil, err
-			}
-			cloudURL = uploadedURL
-		}
-
 		staged = append(staged, models.StagedFile{
 			FileID:        fileID,
 			OriginalName:  file.Filename,
 			StoredPath:    storedPath,
-			CloudURL:      cloudURL,
 			Size:          file.Size,
 			ContentType:   file.Header.Get("Content-Type"),
 			DetectedKind:  detectedKind,
@@ -85,6 +77,28 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader, chatID string, userID
 	}
 
 	return staged, nil
+}
+
+func (p *Parser) AttachCloudURL(ctx context.Context, staged *models.StagedFile) error {
+	if staged == nil || strings.TrimSpace(staged.StoredPath) == "" {
+		return nil
+	}
+	if p.cloudinary == nil || !p.cloudinary.Enabled() {
+		return nil
+	}
+
+	payload, err := os.ReadFile(staged.StoredPath)
+	if err != nil {
+		return err
+	}
+
+	uploadedURL, err := p.cloudinary.Upload(ctx, staged.OriginalName, payload)
+	if err != nil {
+		return err
+	}
+
+	staged.CloudURL = uploadedURL
+	return nil
 }
 
 func (p *Parser) StageYouTubeURL(rawURL string, chatID string, userID string) ([]models.StagedFile, error) {
