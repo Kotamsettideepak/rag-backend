@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -8,7 +9,6 @@ import (
 )
 
 const (
-	defaultDeepgramBaseURL     = "https://api.deepgram.com/v1"
 	defaultDeepgramTTSModel    = "aura-2-thalia-en"
 	defaultDeepgramSTTModel    = "nova-3"
 	defaultDeepgramTTSEncoding = "mp3"
@@ -19,11 +19,7 @@ func GetDeepgramAPIKey() string {
 }
 
 func GetDeepgramBaseURL() string {
-	baseURL := strings.TrimSpace(os.Getenv("DEEPGRAM_BASE_URL"))
-	if baseURL == "" {
-		return defaultDeepgramBaseURL
-	}
-	return strings.TrimRight(baseURL, "/")
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("DEEPGRAM_BASE_URL")), "/")
 }
 
 func GetDeepgramTTSModel() string {
@@ -62,4 +58,11 @@ func GetDeepgramTimeout() time.Duration {
 	}
 
 	return time.Duration(seconds) * time.Second
+}
+
+func ValidateDeepgramConfig() error {
+	if GetDeepgramBaseURL() == "" {
+		return fmt.Errorf("DEEPGRAM_BASE_URL is required")
+	}
+	return nil
 }

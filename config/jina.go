@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -8,7 +9,6 @@ import (
 )
 
 const (
-	defaultJinaBaseURL = "https://api.jina.ai/v1/embeddings"
 	defaultJinaModel   = "jina-embeddings-v5-text-nano"
 	defaultJinaTask    = "retrieval.query"
 	defaultJinaTimeout = 60
@@ -19,11 +19,7 @@ func GetJinaAPIKey() string {
 }
 
 func GetJinaBaseURL() string {
-	baseURL := strings.TrimSpace(os.Getenv("JINA_BASE_URL"))
-	if baseURL == "" {
-		return defaultJinaBaseURL
-	}
-	return strings.TrimRight(baseURL, "/")
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("JINA_BASE_URL")), "/")
 }
 
 func GetJinaModel() string {
@@ -54,4 +50,11 @@ func GetJinaTimeout() time.Duration {
 	}
 
 	return time.Duration(seconds) * time.Second
+}
+
+func ValidateJinaConfig() error {
+	if GetJinaBaseURL() == "" {
+		return fmt.Errorf("JINA_BASE_URL is required")
+	}
+	return nil
 }

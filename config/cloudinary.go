@@ -1,11 +1,10 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strings"
 )
-
-const defaultCloudinaryBaseURL = "https://api.cloudinary.com/v1_1"
 
 func GetCloudinaryCloudName() string {
 	return strings.TrimSpace(os.Getenv("CLOUDINARY_CLOUD_NAME"))
@@ -28,9 +27,12 @@ func GetCloudinaryFolder() string {
 }
 
 func GetCloudinaryBaseURL() string {
-	baseURL := strings.TrimSpace(os.Getenv("CLOUDINARY_BASE_URL"))
-	if baseURL == "" {
-		return defaultCloudinaryBaseURL
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("CLOUDINARY_BASE_URL")), "/")
+}
+
+func ValidateCloudinaryConfig() error {
+	if GetCloudinaryBaseURL() == "" {
+		return fmt.Errorf("CLOUDINARY_BASE_URL is required")
 	}
-	return strings.TrimRight(baseURL, "/")
+	return nil
 }

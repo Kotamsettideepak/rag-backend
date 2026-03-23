@@ -20,14 +20,33 @@ import (
 )
 
 func main() {
-	log.Printf("[startup] starting Gin backend on :8080")
-
 	if err := config.LoadEnvFile(".env"); err != nil {
 		if !os.IsNotExist(err) {
 			log.Fatalf("[startup] failed to load .env: %v", err)
 		}
 		log.Printf("[startup] .env not found, using existing process environment")
 	}
+	if err := config.ValidateServerConfig(); err != nil {
+		log.Fatalf("[startup] invalid server config: %v", err)
+	}
+	if err := config.ValidateGroqConfig(); err != nil {
+		log.Fatalf("[startup] invalid groq config: %v", err)
+	}
+	if err := config.ValidateJinaConfig(); err != nil {
+		log.Fatalf("[startup] invalid jina config: %v", err)
+	}
+	if err := config.ValidateDeepgramConfig(); err != nil {
+		log.Fatalf("[startup] invalid deepgram config: %v", err)
+	}
+	if err := config.ValidateGeminiConfig(); err != nil {
+		log.Fatalf("[startup] invalid gemini config: %v", err)
+	}
+	if err := config.ValidateCloudinaryConfig(); err != nil {
+		log.Fatalf("[startup] invalid cloudinary config: %v", err)
+	}
+
+	serverAddr := config.GetServerAddr()
+	log.Printf("[startup] starting Gin backend on %s", serverAddr)
 
 	if err := config.EnsureChromaRunning(); err != nil {
 		log.Fatalf("[startup] failed to ensure chroma is running: %v", err)
@@ -60,12 +79,12 @@ func main() {
 	routes.RegisterRoutes(router)
 
 	server := &http.Server{
-		Addr:    ":8080",
+		Addr:    serverAddr,
 		Handler: router,
 	}
 
 	go func() {
-		log.Printf("[startup] backend ready and listening on :8080")
+		log.Printf("[startup] backend ready and listening on %s", serverAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("[startup] server failed: %v", err)
 		}

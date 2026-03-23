@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -8,7 +9,6 @@ import (
 )
 
 const (
-	defaultGeminiBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	defaultGeminiModel   = "gemini-2.5-flash"
 )
 
@@ -17,11 +17,7 @@ func GetGeminiAPIKey() string {
 }
 
 func GetGeminiBaseURL() string {
-	baseURL := strings.TrimSpace(os.Getenv("GEMINI_BASE_URL"))
-	if baseURL == "" {
-		return defaultGeminiBaseURL
-	}
-	return strings.TrimRight(baseURL, "/")
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("GEMINI_BASE_URL")), "/")
 }
 
 func GetGeminiModel() string {
@@ -44,4 +40,11 @@ func GetGeminiTimeout() time.Duration {
 	}
 
 	return time.Duration(seconds) * time.Second
+}
+
+func ValidateGeminiConfig() error {
+	if GetGeminiBaseURL() == "" {
+		return fmt.Errorf("GEMINI_BASE_URL is required")
+	}
+	return nil
 }

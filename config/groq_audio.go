@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -14,11 +15,7 @@ func GetGroqAPIKey() string {
 }
 
 func GetGroqBaseURL() string {
-	baseURL := strings.TrimSpace(os.Getenv("GROQ_BASE_URL"))
-	if baseURL == "" {
-		return "https://api.groq.com/openai/v1"
-	}
-	return strings.TrimRight(baseURL, "/")
+	return strings.TrimRight(strings.TrimSpace(os.Getenv("GROQ_BASE_URL")), "/")
 }
 
 func GetGroqAudioModel() string {
@@ -102,4 +99,11 @@ func GetGroqAudioChunkOverlapSeconds() float64 {
 	}
 
 	return value
+}
+
+func ValidateGroqConfig() error {
+	if GetGroqBaseURL() == "" {
+		return fmt.Errorf("GROQ_BASE_URL is required")
+	}
+	return nil
 }

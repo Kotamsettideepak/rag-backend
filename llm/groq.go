@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gin-backend/config"
 	"io"
 	"net/http"
 	"os"
@@ -15,7 +16,6 @@ import (
 )
 
 const (
-	defaultGroqBaseURL = "https://api.groq.com/openai/v1"
 	defaultGroqModel   = "llama-3.1-8b-instant"
 )
 
@@ -74,10 +74,7 @@ func NewGroqClient() LLMClient {
 		}
 	}
 
-	baseURL := strings.TrimRight(strings.TrimSpace(os.Getenv("GROQ_BASE_URL")), "/")
-	if baseURL == "" {
-		baseURL = defaultGroqBaseURL
-	}
+	baseURL := config.GetGroqBaseURL()
 
 	model := strings.TrimSpace(os.Getenv("GROQ_MODEL"))
 	if model == "" {
