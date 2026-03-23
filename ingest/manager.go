@@ -98,14 +98,18 @@ func (m *Manager) SubmitUpload(files []*multipart.FileHeader, chatID string, use
 	now := time.Now().UTC()
 
 	job := &models.UploadJob{
-		ID:        jobID,
-		Status:    models.JobQueued,
-		Stage:     "queued",
-		CreatedAt: now,
-		UpdatedAt: now,
-		QueuedAt:  now,
-		FileCount: len(stagedFiles),
-		Files:     make([]models.FileResult, 0, len(stagedFiles)),
+		ID:              jobID,
+		Status:          models.JobQueued,
+		Stage:           "queued",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		QueuedAt:        now,
+		FileCount:       len(stagedFiles),
+		Files:           make([]models.FileResult, 0, len(stagedFiles)),
+		Summary:         summarizeStage("queued"),
+		Detail:          "Your upload was accepted and is waiting for a worker to begin processing.",
+		ProgressLabel:   fmt.Sprintf("0 of %d files started", len(stagedFiles)),
+		ProgressPercent: 2,
 	}
 
 	for _, file := range stagedFiles {
@@ -137,14 +141,18 @@ func (m *Manager) SubmitYouTube(url string, chatID string, userID string) (*mode
 	jobID := generateID()
 	now := time.Now().UTC()
 	job := &models.UploadJob{
-		ID:        jobID,
-		Status:    models.JobQueued,
-		Stage:     "queued",
-		CreatedAt: now,
-		UpdatedAt: now,
-		QueuedAt:  now,
-		FileCount: len(stagedFiles),
-		Files:     make([]models.FileResult, 0, len(stagedFiles)),
+		ID:              jobID,
+		Status:          models.JobQueued,
+		Stage:           "queued",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+		QueuedAt:        now,
+		FileCount:       len(stagedFiles),
+		Files:           make([]models.FileResult, 0, len(stagedFiles)),
+		Summary:         summarizeStage("queued"),
+		Detail:          "Your YouTube link was accepted and is waiting for background processing to begin.",
+		ProgressLabel:   fmt.Sprintf("0 of %d items started", len(stagedFiles)),
+		ProgressPercent: 2,
 	}
 
 	for _, file := range stagedFiles {
@@ -358,6 +366,9 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		target.Status = models.JobProcessing
 		target.Stage = "processing"
 		target.Summary = summarizeStage("processing")
+		target.Detail = "We are validating the request, preparing temporary files, and selecting the correct extraction pipeline."
+		target.ProgressLabel = fmt.Sprintf("0 of %d files prepared", len(queued.Files))
+		target.ProgressPercent = 5
 		target.UpdatedAt = startedAt
 		target.StartedAt = &startedAt
 	})
@@ -371,12 +382,12 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	documents := make([]models.ParsedDocument, 0, len(queued.Files))
 	trace.Mark("INGEST", "starting extraction")
 
-	for _, file := range queued.Files {
+	for index, file := range queued.Files {
 		stopProgress := func() {}
 		if file.DetectedKind == KindYouTube {
-			stopProgress = m.startYouTubeExtractionProgress(queued.ID)
+			stopProgress = m.startYouTubeExtractionProgress(queued.ID, file, index, len(queued.Files))
 		} else {
-			m.setJobStage(queued.ID, "extracting")
+			m.setJobStageDetailed(queued.ID, "extracting", file, index, len(queued.Files), 18)
 		}
 
 		document, err := m.router.Extract(ctx, file)
@@ -400,6 +411,14 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 			result.Status = "parsed"
 			result.Pages = len(document.PageTexts)
 		})
+		m.updateJob(queued.ID, func(target *models.UploadJob) {
+			target.CurrentFile = file.OriginalName
+			target.CurrentKind = file.DetectedKind
+			target.Detail = fmt.Sprintf("Finished extracting usable content from %s.", file.OriginalName)
+			target.ProgressLabel = fmt.Sprintf("Extracted %d of %d files", index+1, len(queued.Files))
+			target.ProgressPercent = clampPercent(10 + ((index + 1) * 25 / maxInt(len(queued.Files), 1)))
+			target.UpdatedAt = time.Now().UTC()
+		})
 	}
 	parseDuration := time.Since(parseStart)
 
@@ -407,13 +426,21 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	allChunks := make([]models.Chunk, 0)
 	m.setJobStage(queued.ID, "chunking")
 	trace.Mark("INGEST", "starting chunking")
-	for _, document := range documents {
+	for index, document := range documents {
 		chunks := m.chunker.ChunkDocument(document)
 		allChunks = append(allChunks, chunks...)
 		log.Printf("[ingest] chunked file=%s kind=%s chunks=%d", document.FileName, document.FileKind, len(chunks))
 
 		m.updateFile(queued.ID, document.FileID, func(result *models.FileResult) {
 			result.Status = "chunked"
+		})
+		m.updateJob(queued.ID, func(target *models.UploadJob) {
+			target.CurrentFile = document.FileName
+			target.CurrentKind = document.FileKind
+			target.Detail = fmt.Sprintf("Organizing extracted content from %s into retrieval chunks.", document.FileName)
+			target.ProgressLabel = fmt.Sprintf("Chunked %d of %d files into %d chunks", index+1, len(documents), len(allChunks))
+			target.ProgressPercent = clampPercent(40 + ((index + 1) * 15 / maxInt(len(documents), 1)))
+			target.UpdatedAt = time.Now().UTC()
 		})
 	}
 	chunkDuration := time.Since(chunkStart)
@@ -422,6 +449,9 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		target.TotalChunks = len(allChunks)
 		target.Metrics.ParseDurationMs = parseDuration.Milliseconds()
 		target.Metrics.ChunkDurationMs = chunkDuration.Milliseconds()
+		target.Detail = fmt.Sprintf("Prepared %d retrieval chunks. Next we will generate embeddings.", len(allChunks))
+		target.ProgressLabel = fmt.Sprintf("%d chunks ready for embeddings", len(allChunks))
+		target.ProgressPercent = 55
 		target.UpdatedAt = time.Now().UTC()
 	})
 
@@ -433,6 +463,9 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 			target.CompletedAt = &completedAt
 			target.UpdatedAt = completedAt
 			target.Summary = "Upload completed, but no extractable text was found."
+			target.Detail = "The pipeline finished, but there was no usable text to index for chat."
+			target.ProgressLabel = "Nothing was indexed"
+			target.ProgressPercent = 100
 			target.Metrics.TotalDurationMs = time.Since(processStarted).Milliseconds()
 		})
 		trace.End("INGEST", "completed with no extractable text")
@@ -496,6 +529,9 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 				target.UpdatedAt = time.Now().UTC()
 				target.Metrics.EmbeddingDurationMs = embeddingDuration.Milliseconds()
 				target.Metrics.StorageDurationMs = storageDuration.Milliseconds()
+				target.Detail = fmt.Sprintf("Generated embeddings for %d of %d chunks.", target.CompletedChunks, target.TotalChunks)
+				target.ProgressLabel = fmt.Sprintf("Embedded %d of %d chunks", target.CompletedChunks, target.TotalChunks)
+				target.ProgressPercent = clampPercent(55 + (target.CompletedChunks * 25 / maxInt(target.TotalChunks, 1)))
 			})
 
 			pendingRecords = pendingRecords[:0]
@@ -519,6 +555,9 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 			target.UpdatedAt = time.Now().UTC()
 			target.Metrics.EmbeddingDurationMs = embeddingDuration.Milliseconds()
 			target.Metrics.StorageDurationMs = storageDuration.Milliseconds()
+			target.Detail = fmt.Sprintf("Saved %d of %d chunks into the vector database.", target.CompletedChunks, target.TotalChunks)
+			target.ProgressLabel = fmt.Sprintf("Stored %d of %d chunks", target.CompletedChunks, target.TotalChunks)
+			target.ProgressPercent = clampPercent(82 + (target.CompletedChunks * 15 / maxInt(target.TotalChunks, 1)))
 		})
 	}
 
@@ -535,6 +574,9 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 		target.CompletedAt = &completedAt
 		target.UpdatedAt = completedAt
 		target.Summary = "Upload completed. The files are ready for chat."
+		target.Detail = fmt.Sprintf("Finished processing %d file(s). %d chunks are now indexed and searchable.", len(queued.Files), len(allChunks))
+		target.ProgressLabel = "Ready for chat"
+		target.ProgressPercent = 100
 		target.Metrics.ParseDurationMs = parseDuration.Milliseconds()
 		target.Metrics.ChunkDurationMs = chunkDuration.Milliseconds()
 		target.Metrics.EmbeddingDurationMs = embeddingDuration.Milliseconds()
@@ -560,6 +602,9 @@ func (m *Manager) failJob(jobID string, err error) {
 		target.Stage = "failed"
 		target.Error = err.Error()
 		target.Summary = summarizeStage("failed")
+		target.Detail = "The pipeline stopped before completion. Check the error message for the exact reason."
+		target.ProgressLabel = "Processing stopped"
+		target.ProgressPercent = 100
 		target.CompletedAt = &completedAt
 		target.UpdatedAt = completedAt
 		target.Metrics.TotalDurationMs = target.UpdatedAt.Sub(target.CreatedAt).Milliseconds()
@@ -570,12 +615,28 @@ func (m *Manager) setJobStage(jobID string, stage string) {
 	m.updateJob(jobID, func(target *models.UploadJob) {
 		target.Stage = strings.TrimSpace(stage)
 		target.Summary = summarizeStage(stage)
+		target.Detail = describeStage(stage, target.CurrentFile, target.CurrentKind)
+		target.ProgressLabel = defaultProgressLabel(stage)
+		target.ProgressPercent = defaultProgressPercent(stage)
 		target.UpdatedAt = time.Now().UTC()
 	})
 }
 
-func (m *Manager) startYouTubeExtractionProgress(jobID string) func() {
-	m.setJobStage(jobID, "downloading")
+func (m *Manager) setJobStageDetailed(jobID string, stage string, file models.StagedFile, fileIndex int, totalFiles int, fallbackPercent int) {
+	m.updateJob(jobID, func(target *models.UploadJob) {
+		target.Stage = strings.TrimSpace(stage)
+		target.Summary = summarizeStage(stage)
+		target.CurrentFile = strings.TrimSpace(file.OriginalName)
+		target.CurrentKind = strings.TrimSpace(file.DetectedKind)
+		target.Detail = describeStage(stage, target.CurrentFile, target.CurrentKind)
+		target.ProgressLabel = fmt.Sprintf("%d of %d files in progress", fileIndex+1, maxInt(totalFiles, 1))
+		target.ProgressPercent = fallbackPercent
+		target.UpdatedAt = time.Now().UTC()
+	})
+}
+
+func (m *Manager) startYouTubeExtractionProgress(jobID string, file models.StagedFile, fileIndex int, totalFiles int) func() {
+	m.setJobStageDetailed(jobID, "downloading", file, fileIndex, totalFiles, 20)
 
 	done := make(chan struct{})
 	go func() {
@@ -584,7 +645,7 @@ func (m *Manager) startYouTubeExtractionProgress(jobID string) func() {
 
 		select {
 		case <-timer.C:
-			m.setJobStage(jobID, "transcribing")
+			m.setJobStageDetailed(jobID, "transcribing", file, fileIndex, totalFiles, 32)
 		case <-done:
 			return
 		}
@@ -749,4 +810,105 @@ func summarizeStage(stage string) string {
 	default:
 		return "Processing your files."
 	}
+}
+
+func describeStage(stage string, currentFile string, currentKind string) string {
+	fileLabel := strings.TrimSpace(currentFile)
+	if fileLabel == "" {
+		fileLabel = "your content"
+	}
+
+	switch strings.ToLower(strings.TrimSpace(stage)) {
+	case "queued":
+		return "Your request is waiting in the processing queue."
+	case "processing":
+		return "Preparing the upload, validating inputs, and choosing the right extraction path."
+	case "extracting":
+		return fmt.Sprintf("Extracting usable content from %s.", fileLabel)
+	case "downloading":
+		return fmt.Sprintf("Downloading the video and isolating the audio track from %s.", fileLabel)
+	case "transcribing":
+		return fmt.Sprintf("Converting the extracted audio from %s into searchable text.", fileLabel)
+	case "chunking":
+		return "Splitting the extracted content into retrieval-ready chunks."
+	case "embedding":
+		return "Generating vector embeddings so your content can be searched semantically."
+	case "storing":
+		return "Saving the processed chunks into the vector database."
+	case "completed":
+		return "Everything finished successfully and the content is ready for chat."
+	case "failed":
+		return "The job stopped before finishing."
+	default:
+		return "Processing your request."
+	}
+}
+
+func defaultProgressLabel(stage string) string {
+	switch strings.ToLower(strings.TrimSpace(stage)) {
+	case "queued":
+		return "Waiting to start"
+	case "processing":
+		return "Preparing job"
+	case "extracting":
+		return "Extracting content"
+	case "downloading":
+		return "Downloading video"
+	case "transcribing":
+		return "Transcribing audio"
+	case "chunking":
+		return "Building chunks"
+	case "embedding":
+		return "Generating embeddings"
+	case "storing":
+		return "Saving vectors"
+	case "completed":
+		return "Ready for chat"
+	case "failed":
+		return "Needs attention"
+	default:
+		return "Processing"
+	}
+}
+
+func defaultProgressPercent(stage string) int {
+	switch strings.ToLower(strings.TrimSpace(stage)) {
+	case "queued":
+		return 2
+	case "processing":
+		return 5
+	case "extracting":
+		return 18
+	case "downloading":
+		return 20
+	case "transcribing":
+		return 32
+	case "chunking":
+		return 45
+	case "embedding":
+		return 60
+	case "storing":
+		return 85
+	case "completed", "failed":
+		return 100
+	default:
+		return 0
+	}
+}
+
+func clampPercent(value int) int {
+	if value < 0 {
+		return 0
+	}
+	if value > 100 {
+		return 100
+	}
+	return value
+}
+
+func maxInt(left int, right int) int {
+	if left > right {
+		return left
+	}
+	return right
 }

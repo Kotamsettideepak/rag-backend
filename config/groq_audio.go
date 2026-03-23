@@ -70,3 +70,36 @@ func GetGroqAudioMaxRetries() int {
 
 	return value
 }
+
+func GetGroqAudioChunkSizeSeconds() float64 {
+	raw := strings.TrimSpace(os.Getenv("GROQ_AUDIO_CHUNK_SIZE_SECONDS"))
+	if raw == "" {
+		return 60
+	}
+
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value <= 0 {
+		return 60
+	}
+
+	return value
+}
+
+func GetGroqAudioChunkOverlapSeconds() float64 {
+	raw := strings.TrimSpace(os.Getenv("GROQ_AUDIO_CHUNK_OVERLAP_SECONDS"))
+	if raw == "" {
+		return 10
+	}
+
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value < 0 {
+		return 10
+	}
+
+	chunkSize := GetGroqAudioChunkSizeSeconds()
+	if value >= chunkSize {
+		return chunkSize / 2
+	}
+
+	return value
+}

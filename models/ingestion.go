@@ -68,6 +68,11 @@ type UploadJob struct {
 	FailedChunks    int             `json:"failed_chunks"`
 	Stage           string          `json:"stage,omitempty"`
 	Summary         string          `json:"summary,omitempty"`
+	Detail          string          `json:"detail,omitempty"`
+	CurrentFile     string          `json:"current_file,omitempty"`
+	CurrentKind     string          `json:"current_kind,omitempty"`
+	ProgressLabel   string          `json:"progress_label,omitempty"`
+	ProgressPercent int             `json:"progress_percent,omitempty"`
 	Error           string          `json:"error,omitempty"`
 	Metrics         JobMetrics      `json:"metrics"`
 }

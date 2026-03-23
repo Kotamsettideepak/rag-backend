@@ -86,14 +86,19 @@ func UploadHandler(c *gin.Context) {
 	trace.End("UPLOAD", "accepted job_id="+job.ID)
 
 	c.JSON(http.StatusAccepted, gin.H{
-		"job_id":   job.ID,
-		"status":   job.Status,
-		"stage":    job.Stage,
-		"message":  "Upload accepted. Processing in background.",
-		"summary":  "Upload accepted. Processing in background.",
-		"files":    job.Files,
-		"metrics":  job.Metrics,
-		"accepted": true,
+		"job_id":           job.ID,
+		"status":           job.Status,
+		"stage":            job.Stage,
+		"message":          "Upload accepted. Processing in background.",
+		"summary":          "Upload accepted. Processing in background.",
+		"detail":           job.Detail,
+		"current_file":     job.CurrentFile,
+		"current_kind":     job.CurrentKind,
+		"progress_label":   job.ProgressLabel,
+		"progress_percent": job.ProgressPercent,
+		"files":            job.Files,
+		"metrics":          job.Metrics,
+		"accepted":         true,
 	})
 }
 
@@ -146,14 +151,19 @@ func handleYouTubeUpload(c *gin.Context) {
 
 	trace.End("UPLOAD", "accepted youtube job_id="+job.ID)
 	c.JSON(http.StatusAccepted, gin.H{
-		"job_id":   job.ID,
-		"status":   job.Status,
-		"stage":    job.Stage,
-		"message":  "YouTube link accepted. Processing in background.",
-		"summary":  "YouTube link accepted. Processing in background.",
-		"files":    job.Files,
-		"metrics":  job.Metrics,
-		"accepted": true,
+		"job_id":           job.ID,
+		"status":           job.Status,
+		"stage":            job.Stage,
+		"message":          "YouTube link accepted. Processing in background.",
+		"summary":          "YouTube link accepted. Long videos can take a while to download, transcribe, and index.",
+		"detail":           job.Detail,
+		"current_file":     job.CurrentFile,
+		"current_kind":     job.CurrentKind,
+		"progress_label":   job.ProgressLabel,
+		"progress_percent": job.ProgressPercent,
+		"files":            job.Files,
+		"metrics":          job.Metrics,
+		"accepted":         true,
 	})
 }
 
@@ -170,18 +180,23 @@ func StatusHandler(c *gin.Context) {
 
 func statusForClient(job *models.UploadJob) gin.H {
 	return gin.H{
-		"job_id":       job.ID,
-		"status":       job.Status,
-		"stage":        job.Stage,
-		"created_at":   job.CreatedAt,
-		"updated_at":   job.UpdatedAt,
-		"started_at":   job.StartedAt,
-		"completed_at": job.CompletedAt,
-		"file_count":   job.FileCount,
-		"files":        job.Files,
-		"summary":      job.Summary,
-		"error":        job.Error,
-		"metrics":      job.Metrics,
+		"job_id":           job.ID,
+		"status":           job.Status,
+		"stage":            job.Stage,
+		"created_at":       job.CreatedAt,
+		"updated_at":       job.UpdatedAt,
+		"started_at":       job.StartedAt,
+		"completed_at":     job.CompletedAt,
+		"file_count":       job.FileCount,
+		"files":            job.Files,
+		"summary":          job.Summary,
+		"detail":           job.Detail,
+		"current_file":     job.CurrentFile,
+		"current_kind":     job.CurrentKind,
+		"progress_label":   job.ProgressLabel,
+		"progress_percent": job.ProgressPercent,
+		"error":            job.Error,
+		"metrics":          job.Metrics,
 	}
 }
 

@@ -88,6 +88,46 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 		c.model,
 	)
 
+	fileData, err := os.ReadFile(staged.StoredPath)
+	if err != nil {
+		return models.ParsedDocument{}, err
+	}
+
+	if len(fileData) > 0 && len(fileData) <= maxTranscriptionBytes {
+		log.Printf("[audio] using direct transcription file=%s bytes=%d", staged.OriginalName, len(fileData))
+		response, err := c.transcribeFileData(ctx, fileData, staged.OriginalName, -1)
+		if err == nil {
+			duration := estimateAudioDuration(response)
+			directChunks := buildChunksFromResponse(response)
+			documentText, pageTexts := buildAudioTexts(staged, duration, directChunks)
+
+			log.Printf(
+				"[audio] extracted file=%s mode=direct duration=%.2fs segments=%d kept_chunks=%d text_chars=%d preview=%s",
+				staged.OriginalName,
+				duration,
+				len(response.Segments),
+				len(directChunks),
+				len(documentText),
+				previewText(documentText, 220),
+			)
+
+			return models.ParsedDocument{
+				FileID:      staged.FileID,
+				FileName:    staged.OriginalName,
+				FileKind:    staged.DetectedKind,
+				Text:        documentText,
+				PageTexts:   pageTexts,
+				AudioChunks: directChunks,
+				ChatID:      staged.ChatID,
+				UserID:      staged.UserID,
+			}, nil
+		}
+
+		log.Printf("[audio] direct transcription failed, falling back to chunking file=%s err=%v", staged.OriginalName, err)
+	} else {
+		log.Printf("[audio] file exceeds direct transcription size limit, using chunk fallback file=%s bytes=%d", staged.OriginalName, len(fileData))
+	}
+
 	duration, err := probeAudioDuration(ctx, staged.StoredPath)
 	if err != nil {
 		return models.ParsedDocument{}, err
@@ -107,7 +147,7 @@ func (c *HTTPClient) Extract(ctx context.Context, staged models.StagedFile) (mod
 	documentText, pageTexts := buildAudioTexts(staged, duration, mergedChunks)
 
 	log.Printf(
-		"[audio] extracted file=%s duration=%.2fs windows=%d kept_chunks=%d text_chars=%d preview=%s",
+		"[audio] extracted file=%s mode=chunked duration=%.2fs windows=%d kept_chunks=%d text_chars=%d preview=%s",
 		staged.OriginalName,
 		duration,
 		len(windows),
@@ -179,10 +219,19 @@ func (c *HTTPClient) transcribeChunkFile(
 		return transcriptionResponse{}, fmt.Errorf("audio chunk %d exceeds current transcription limit of 25 MB", chunkIndex)
 	}
 
+	return c.transcribeFileData(ctx, fileData, filepath.Base(chunkPath), chunkIndex)
+}
+
+func (c *HTTPClient) transcribeFileData(
+	ctx context.Context,
+	fileData []byte,
+	fileName string,
+	chunkIndex int,
+) (transcriptionResponse, error) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	part, err := writer.CreateFormFile("file", filepath.Base(chunkPath))
+	part, err := writer.CreateFormFile("file", filepath.Base(fileName))
 	if err != nil {
 		return transcriptionResponse{}, err
 	}
@@ -204,8 +253,10 @@ func (c *HTTPClient) transcribeChunkFile(
 
 	endpoint := c.baseURL + "/audio/transcriptions"
 	for attempt := 1; attempt <= c.maxRetries; attempt++ {
-		if err := c.waitForTranscriptionSlot(ctx); err != nil {
-			return transcriptionResponse{}, err
+		if chunkIndex >= 0 {
+			if err := c.waitForTranscriptionSlot(ctx); err != nil {
+				return transcriptionResponse{}, err
+			}
 		}
 
 		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body.Bytes()))
@@ -215,15 +266,26 @@ func (c *HTTPClient) transcribeChunkFile(
 		req.Header.Set("Content-Type", writer.FormDataContentType())
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 
-		log.Printf(
-			"[audio] sending Groq transcription request url=%s file=%s chunk=%d attempt=%d model=%s bytes=%d",
-			endpoint,
-			filepath.Base(originalName),
-			chunkIndex,
-			attempt,
-			c.model,
-			len(fileData),
-		)
+		if chunkIndex >= 0 {
+			log.Printf(
+				"[audio] sending Groq transcription request url=%s file=%s chunk=%d attempt=%d model=%s bytes=%d",
+				endpoint,
+				filepath.Base(fileName),
+				chunkIndex,
+				attempt,
+				c.model,
+				len(fileData),
+			)
+		} else {
+			log.Printf(
+				"[audio] sending Groq transcription request url=%s file=%s mode=direct attempt=%d model=%s bytes=%d",
+				endpoint,
+				filepath.Base(fileName),
+				attempt,
+				c.model,
+				len(fileData),
+			)
+		}
 
 		resp, err := c.client.Do(req)
 		if err != nil {
@@ -241,14 +303,24 @@ func (c *HTTPClient) transcribeChunkFile(
 		if readErr != nil {
 			return transcriptionResponse{}, readErr
 		}
-		log.Printf(
-			"[audio] response status=%d file=%s chunk=%d attempt=%d body=%s",
-			resp.StatusCode,
-			originalName,
-			chunkIndex,
-			attempt,
-			strings.TrimSpace(string(responseBody)),
-		)
+		if chunkIndex >= 0 {
+			log.Printf(
+				"[audio] response status=%d file=%s chunk=%d attempt=%d body=%s",
+				resp.StatusCode,
+				fileName,
+				chunkIndex,
+				attempt,
+				strings.TrimSpace(string(responseBody)),
+			)
+		} else {
+			log.Printf(
+				"[audio] response status=%d file=%s mode=direct attempt=%d body=%s",
+				resp.StatusCode,
+				fileName,
+				attempt,
+				strings.TrimSpace(string(responseBody)),
+			)
+		}
 		if resp.StatusCode == http.StatusOK {
 			var parsed transcriptionResponse
 			if err := json.Unmarshal(responseBody, &parsed); err != nil {
@@ -321,9 +393,16 @@ func buildAudioWindows(duration float64) []audioWindow {
 		return nil
 	}
 
-	windows := make([]audioWindow, 0, int(duration/audioChunkStepSeconds)+1)
-	for start := 0.0; start < duration; start += audioChunkStepSeconds {
-		end := start + audioChunkSizeSeconds
+	chunkSize := config.GetGroqAudioChunkSizeSeconds()
+	overlap := config.GetGroqAudioChunkOverlapSeconds()
+	step := chunkSize - overlap
+	if step <= 0 {
+		step = chunkSize
+	}
+
+	windows := make([]audioWindow, 0, int(duration/step)+1)
+	for start := 0.0; start < duration; start += step {
+		end := start + chunkSize
 		if end > duration {
 			end = duration
 		}
@@ -438,6 +517,29 @@ func buildTranscriptChunk(window audioWindow, response transcriptionResponse) (m
 	}, true
 }
 
+func buildChunksFromResponse(response transcriptionResponse) []models.AudioTranscriptChunk {
+	if len(response.Segments) == 0 {
+		return nil
+	}
+
+	chunks := make([]models.AudioTranscriptChunk, 0, len(response.Segments))
+	for _, segment := range response.Segments {
+		text := strings.Join(strings.Fields(strings.TrimSpace(segment.Text)), " ")
+		if len(text) < minTranscriptChars {
+			continue
+		}
+
+		chunks = append(chunks, models.AudioTranscriptChunk{
+			Content: text,
+			Start:   segment.Start,
+			End:     segment.End,
+			Type:    "audio_transcript",
+		})
+	}
+
+	return mergeSmallTranscriptChunks(chunks)
+}
+
 func mergeSmallTranscriptChunks(chunks []models.AudioTranscriptChunk) []models.AudioTranscriptChunk {
 	if len(chunks) == 0 {
 		return nil
@@ -495,6 +597,21 @@ func formatAudioTranscriptLine(chunk models.AudioTranscriptChunk) string {
 
 func formatTimestamp(seconds float64) string {
 	return fmt.Sprintf("%.2f", seconds)
+}
+
+func estimateAudioDuration(response transcriptionResponse) float64 {
+	if response.Duration > 0 {
+		return response.Duration
+	}
+
+	var maxEnd float64
+	for _, segment := range response.Segments {
+		if segment.End > maxEnd {
+			maxEnd = segment.End
+		}
+	}
+
+	return maxEnd
 }
 
 func previewText(text string, limit int) string {
