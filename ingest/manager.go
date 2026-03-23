@@ -117,9 +117,12 @@ func (m *Manager) SubmitUpload(files []*multipart.FileHeader, chatID string, use
 
 	m.mu.Lock()
 	m.jobs[jobID] = job
+	jobCount := len(m.jobs)
 	m.mu.Unlock()
 
+	log.Printf("[jobs] submit upload job=%s chat_id=%s user_id=%s files=%d in_memory_jobs=%d", jobID, chatID, userID, len(stagedFiles), jobCount)
 	m.jobQueue <- queuedJob{ID: jobID, Files: stagedFiles}
+	log.Printf("[jobs] queued upload job=%s queue_depth=%d", jobID, len(m.jobQueue))
 	return cloneJob(job), nil
 }
 
@@ -156,9 +159,12 @@ func (m *Manager) SubmitYouTube(url string, chatID string, userID string) (*mode
 
 	m.mu.Lock()
 	m.jobs[jobID] = job
+	jobCount := len(m.jobs)
 	m.mu.Unlock()
 
+	log.Printf("[jobs] submit youtube job=%s chat_id=%s user_id=%s files=%d in_memory_jobs=%d", jobID, chatID, userID, len(stagedFiles), jobCount)
 	m.jobQueue <- queuedJob{ID: jobID, Files: stagedFiles}
+	log.Printf("[jobs] queued youtube job=%s queue_depth=%d", jobID, len(m.jobQueue))
 	return cloneJob(job), nil
 }
 
@@ -168,9 +174,11 @@ func (m *Manager) GetJob(jobID string) (*models.UploadJob, bool) {
 
 	job, ok := m.jobs[jobID]
 	if !ok {
+		log.Printf("[jobs] get miss job=%s in_memory_jobs=%d", jobID, len(m.jobs))
 		return nil, false
 	}
 
+	log.Printf("[jobs] get hit job=%s status=%s stage=%s in_memory_jobs=%d", jobID, job.Status, job.Stage, len(m.jobs))
 	return cloneJob(job), true
 }
 
@@ -178,6 +186,7 @@ func (m *Manager) SubscribeJob(jobID string) (<-chan *models.UploadJob, func(), 
 	m.mu.Lock()
 	job, ok := m.jobs[jobID]
 	if !ok {
+		log.Printf("[jobs] subscribe miss job=%s in_memory_jobs=%d", jobID, len(m.jobs))
 		m.mu.Unlock()
 		return nil, nil, fmt.Errorf("job not found")
 	}
@@ -188,9 +197,11 @@ func (m *Manager) SubscribeJob(jobID string) (<-chan *models.UploadJob, func(), 
 		m.jobSubs[jobID] = make(map[string]chan *models.UploadJob)
 	}
 	m.jobSubs[jobID][subID] = updates
+	subCount := len(m.jobSubs[jobID])
 	snapshot := cloneJob(job)
 	m.mu.Unlock()
 
+	log.Printf("[jobs] subscribe hit job=%s sub_id=%s subscribers=%d status=%s stage=%s", jobID, subID, subCount, job.Status, job.Stage)
 	updates <- snapshot
 
 	unsubscribe := func() {
@@ -212,6 +223,7 @@ func (m *Manager) SubscribeJob(jobID string) (<-chan *models.UploadJob, func(), 
 		if len(subscribers) == 0 {
 			delete(m.jobSubs, jobID)
 		}
+		log.Printf("[jobs] unsubscribe job=%s sub_id=%s remaining_subscribers=%d", jobID, subID, len(subscribers))
 	}
 
 	return updates, unsubscribe, nil
@@ -332,15 +344,19 @@ func (m *Manager) DeleteChatContext(chatID string, userID string) error {
 
 func (m *Manager) runJobWorker(ctx context.Context, workerID int) {
 	defer m.wg.Done()
+	log.Printf("[jobs] worker started worker_id=%d", workerID)
 
 	for {
 		select {
 		case <-ctx.Done():
+			log.Printf("[jobs] worker stopping worker_id=%d reason=context_cancelled", workerID)
 			return
 		case queued, ok := <-m.jobQueue:
 			if !ok {
+				log.Printf("[jobs] worker stopping worker_id=%d reason=queue_closed", workerID)
 				return
 			}
+			log.Printf("[jobs] worker picked job=%s worker_id=%d queue_depth=%d", queued.ID, workerID, len(m.jobQueue))
 			m.processJob(ctx, queued)
 		}
 	}
@@ -348,6 +364,7 @@ func (m *Manager) runJobWorker(ctx context.Context, workerID int) {
 
 func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 	if _, ok := m.GetJob(queued.ID); !ok {
+		log.Printf("[jobs] process abort job=%s reason=missing_before_start", queued.ID)
 		return
 	}
 	trace.Start("INGEST", "job_id="+queued.ID)

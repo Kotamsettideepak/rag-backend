@@ -169,12 +169,15 @@ func handleYouTubeUpload(c *gin.Context) {
 
 func StatusHandler(c *gin.Context) {
 	jobID := c.Param("job_id")
+	log.Printf("[upload-status] http lookup job=%s", jobID)
 	job, ok := ingest.DefaultManager().GetJob(jobID)
 	if !ok {
+		log.Printf("[upload-status] http miss job=%s", jobID)
 		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
 		return
 	}
 
+	log.Printf("[upload-status] http hit job=%s status=%s stage=%s", jobID, job.Status, job.Stage)
 	c.JSON(http.StatusOK, statusForClient(job))
 }
 
@@ -209,9 +212,11 @@ func UploadStatusWebSocketHandler(c *gin.Context) {
 
 	websocket.Handler(func(conn *websocket.Conn) {
 		defer conn.Close()
+		log.Printf("[upload-ws] subscribe start job=%s remote=%s", jobID, conn.Request().RemoteAddr)
 
 		updates, unsubscribe, err := ingest.DefaultManager().SubscribeJob(jobID)
 		if err != nil {
+			log.Printf("[upload-ws] subscribe miss job=%s remote=%s err=%v", jobID, conn.Request().RemoteAddr, err)
 			_ = websocket.JSON.Send(conn, gin.H{
 				"type":    "error",
 				"message": "job not found",
@@ -223,20 +228,24 @@ func UploadStatusWebSocketHandler(c *gin.Context) {
 		for {
 			select {
 			case <-conn.Request().Context().Done():
+				log.Printf("[upload-ws] subscribe closed job=%s remote=%s reason=request_context_done", jobID, conn.Request().RemoteAddr)
 				return
 			case job, ok := <-updates:
 				if !ok {
+					log.Printf("[upload-ws] subscribe closed job=%s remote=%s reason=updates_channel_closed", jobID, conn.Request().RemoteAddr)
 					return
 				}
 
 				payload := statusForClient(job)
 				payload["type"] = "status"
+				log.Printf("[upload-ws] send status job=%s status=%s stage=%s remote=%s", jobID, job.Status, job.Stage, conn.Request().RemoteAddr)
 				if err := websocket.JSON.Send(conn, payload); err != nil {
 					log.Printf("[upload-ws] send failed for job=%s: %v", jobID, err)
 					return
 				}
 
 				if job.Status == models.JobCompleted || job.Status == models.JobFailed {
+					log.Printf("[upload-ws] subscribe finished job=%s final_status=%s", jobID, job.Status)
 					return
 				}
 			}
