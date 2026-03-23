@@ -19,7 +19,7 @@ func EnsureExtractorRunning() error {
 		name:    "extractor service",
 		baseURL: GetExtractorBaseURL(),
 		envKey:  "EXTRACTOR",
-		port:    "8090",
+		port:    GetExtractorPort(),
 		workdir: "extractor-service",
 	})
 }
@@ -32,7 +32,7 @@ func ShutdownExtractorIfStarted() {
 		name:    "extractor service",
 		baseURL: GetExtractorBaseURL(),
 		envKey:  "EXTRACTOR",
-		port:    "8090",
+		port:    GetExtractorPort(),
 		workdir: "extractor-service",
 	})
 }

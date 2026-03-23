@@ -42,10 +42,7 @@ type queuedJob struct {
 	Files []models.StagedFile
 }
 
-func NewManager() *Manager {
-	ollamaClient := models.NewOllamaClient()
-	embedder := embedding.NewService(ollamaClient)
-
+func NewManager(embedder *embedding.Service) *Manager {
 	manager := &Manager{
 		parser:         NewParser(),
 		router:         NewDocumentRouter(),

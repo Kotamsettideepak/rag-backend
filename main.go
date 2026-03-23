@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gin-backend/config"
+	"gin-backend/embedding"
 	"gin-backend/ingest"
 	"gin-backend/routes"
 	"gin-backend/store"
@@ -41,7 +42,15 @@ func main() {
 	}
 	defer store.DefaultStore().Close()
 
-	manager := ingest.DefaultManager()
+	apiKey := config.GetJinaAPIKey()
+	if apiKey == "" {
+		log.Fatal("[startup] JINA_API_KEY is required")
+	}
+
+	embeddingRepo := embedding.NewJinaEmbeddingRepository(apiKey)
+	embeddingService := embedding.NewService(embeddingRepo)
+	manager := ingest.NewManager(embeddingService)
+	ingest.SetDefaultManager(manager)
 	defer manager.Shutdown()
 
 	router := gin.Default()

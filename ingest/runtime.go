@@ -1,15 +1,14 @@
 package ingest
 
-import "sync"
-
-var (
-	defaultManager     *Manager
-	defaultManagerOnce sync.Once
-)
+var defaultManager *Manager
 
 func DefaultManager() *Manager {
-	defaultManagerOnce.Do(func() {
-		defaultManager = NewManager()
-	})
+	if defaultManager == nil {
+		panic("default ingest manager is not configured")
+	}
 	return defaultManager
+}
+
+func SetDefaultManager(manager *Manager) {
+	defaultManager = manager
 }

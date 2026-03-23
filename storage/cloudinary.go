@@ -89,7 +89,7 @@ func (c *CloudinaryClient) Upload(ctx context.Context, fileName string, payload 
 		return "", err
 	}
 
-	endpoint := fmt.Sprintf("https://api.cloudinary.com/v1_1/%s/auto/upload", c.cloudName)
+	endpoint := fmt.Sprintf("%s/%s/auto/upload", config.GetCloudinaryBaseURL(), c.cloudName)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
 	if err != nil {
 		return "", err

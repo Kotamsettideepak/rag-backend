@@ -48,7 +48,7 @@ func ensureManagedServiceRunning(service managedService) error {
 		return err
 	}
 
-	cmd := exec.Command(pythonBin, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", service.port)
+	cmd := exec.Command(pythonBin, "-m", "uvicorn", "main:app", "--host", GetExtractorBindHost(), "--port", service.port)
 	cmd.Dir = workdir
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

@@ -11,13 +11,17 @@ import (
 	"gin-backend/models"
 )
 
+type EmbeddingRepository interface {
+	Embed(ctx context.Context, texts []string) ([][]float32, error)
+}
+
 type Service struct {
-	client       *models.OllamaClient
+	client       EmbeddingRepository
 	maxRetries   int
 	retryBackoff time.Duration
 }
 
-func NewService(client *models.OllamaClient) *Service {
+func NewService(client EmbeddingRepository) *Service {
 	return &Service{
 		client:       client,
 		maxRetries:   getEnvInt("EMBED_MAX_RETRIES", 3),
@@ -114,15 +118,22 @@ func buildChunkMetadata(chunk models.Chunk) map[string]interface{} {
 }
 
 func (s *Service) EmbedQuery(ctx context.Context, text string) ([]float64, error) {
-	return s.client.GenerateEmbeddingWithContext(ctx, text)
+	embeddings, err := s.client.Embed(ctx, []string{text})
+	if err != nil {
+		return nil, err
+	}
+	if len(embeddings) != 1 {
+		return nil, fmt.Errorf("embedding repository returned %d embeddings for a single input", len(embeddings))
+	}
+	return toFloat64Vector(embeddings[0]), nil
 }
 
 func (s *Service) embedBatchWithRetry(ctx context.Context, texts []string) ([][]float64, error) {
 	var lastErr error
 	for attempt := 1; attempt <= s.maxRetries; attempt++ {
-		embeddings, err := s.client.GenerateEmbeddingsWithContext(ctx, texts)
+		embeddings, err := s.client.Embed(ctx, texts)
 		if err == nil {
-			return embeddings, nil
+			return toFloat64Vectors(embeddings), nil
 		}
 
 		lastErr = err
@@ -139,6 +150,26 @@ func (s *Service) embedBatchWithRetry(ctx context.Context, texts []string) ([][]
 	}
 
 	return nil, fmt.Errorf("batch embedding failed after %d attempts: %w", s.maxRetries, lastErr)
+}
+
+func toFloat64Vectors(vectors [][]float32) [][]float64 {
+	if len(vectors) == 0 {
+		return nil
+	}
+
+	converted := make([][]float64, 0, len(vectors))
+	for _, vector := range vectors {
+		converted = append(converted, toFloat64Vector(vector))
+	}
+	return converted
+}
+
+func toFloat64Vector(vector []float32) []float64 {
+	converted := make([]float64, len(vector))
+	for index, value := range vector {
+		converted[index] = float64(value)
+	}
+	return converted
 }
 
 func getEnvInt(key string, fallback int) int {
