@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -20,49 +22,53 @@ import (
 )
 
 func main() {
+	log.SetOutput(io.Discard)
+	log.SetFlags(0)
+	gin.DefaultWriter = io.Discard
+	gin.DefaultErrorWriter = io.Discard
+	gin.SetMode(gin.ReleaseMode)
+
 	if err := config.LoadEnvFile(".env"); err != nil {
 		if !os.IsNotExist(err) {
-			log.Fatalf("[startup] failed to load .env: %v", err)
+			fatalf("[startup] failed to load .env: %v", err)
 		}
-		log.Printf("[startup] .env not found, using existing process environment")
 	}
 	if err := config.ValidateServerConfig(); err != nil {
-		log.Fatalf("[startup] invalid server config: %v", err)
+		fatalf("[startup] invalid server config: %v", err)
 	}
 	if err := config.ValidateGroqConfig(); err != nil {
-		log.Fatalf("[startup] invalid groq config: %v", err)
+		fatalf("[startup] invalid groq config: %v", err)
 	}
 	if err := config.ValidateJinaConfig(); err != nil {
-		log.Fatalf("[startup] invalid jina config: %v", err)
+		fatalf("[startup] invalid jina config: %v", err)
 	}
 	if err := config.ValidateDeepgramConfig(); err != nil {
-		log.Fatalf("[startup] invalid deepgram config: %v", err)
+		fatalf("[startup] invalid deepgram config: %v", err)
 	}
 	if err := config.ValidateGeminiConfig(); err != nil {
-		log.Fatalf("[startup] invalid gemini config: %v", err)
+		fatalf("[startup] invalid gemini config: %v", err)
 	}
 	if err := config.ValidateCloudinaryConfig(); err != nil {
-		log.Fatalf("[startup] invalid cloudinary config: %v", err)
+		fatalf("[startup] invalid cloudinary config: %v", err)
 	}
 
 	serverAddr := config.GetServerAddr()
-	log.Printf("[startup] starting Gin backend on %s", serverAddr)
 
 	if err := config.EnsureChromaRunning(); err != nil {
-		log.Fatalf("[startup] failed to ensure chroma is running: %v", err)
+		fatalf("[startup] failed to ensure chroma is running: %v", err)
 	}
 	if err := config.ValidateExtractorConfig(); err != nil {
-		log.Fatalf("[startup] invalid extractor config: %v", err)
+		fatalf("[startup] invalid extractor config: %v", err)
 	}
 
 	if err := store.InitDefaultStore(context.Background()); err != nil {
-		log.Fatalf("[startup] failed to initialize postgres store: %v", err)
+		fatalf("[startup] failed to initialize postgres store: %v", err)
 	}
 	defer store.DefaultStore().Close()
 
 	apiKeys := config.GetJinaAPIKeys()
 	if len(apiKeys) == 0 {
-		log.Fatal("[startup] at least one JINA_API_KEY is required")
+		fatalf("[startup] at least one JINA_API_KEY is required")
 	}
 
 	embeddingRepo := embedding.NewJinaEmbeddingRepository(apiKeys)
@@ -71,11 +77,11 @@ func main() {
 	ingest.SetDefaultManager(manager)
 	defer manager.Shutdown()
 
-	router := gin.Default()
-	router.MaxMultipartMemory = getEnvBytes("MAX_UPLOAD_SIZE_MB", 128)
+	router := gin.New()
+	router.Use(gin.Recovery())
+	router.MaxMultipartMemory = getEnvBytes("MAX_UPLOAD_SIZE_MB", 300)
 	router.Use(corsMiddleware())
 
-	log.Printf("[startup] registering routes")
 	routes.RegisterRoutes(router)
 
 	server := &http.Server{
@@ -84,9 +90,8 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("[startup] backend ready and listening on %s", serverAddr)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("[startup] server failed: %v", err)
+			fatalf("[startup] server failed: %v", err)
 		}
 	}()
 
@@ -111,13 +116,12 @@ func waitForShutdown(server *http.Server) {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
 	<-stop
-	log.Printf("[shutdown] signal received, shutting down server")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	if err := server.Shutdown(ctx); err != nil {
-		log.Printf("[shutdown] graceful server shutdown failed: %v", err)
+		fatalf("[shutdown] graceful server shutdown failed: %v", err)
 	}
 }
 
@@ -133,4 +137,9 @@ func getEnvBytes(key string, fallbackMB int64) int64 {
 	}
 
 	return value << 20
+}
+
+func fatalf(format string, args ...interface{}) {
+	_, _ = fmt.Fprintf(os.Stderr, format+"\n", args...)
+	os.Exit(1)
 }

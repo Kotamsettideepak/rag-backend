@@ -126,48 +126,6 @@ func (m *Manager) SubmitUpload(files []*multipart.FileHeader, chatID string, use
 	return cloneJob(job), nil
 }
 
-func (m *Manager) SubmitYouTube(url string, chatID string, userID string) (*models.UploadJob, error) {
-	stagedFiles, err := m.parser.StageYouTubeURL(url, chatID, userID)
-	if err != nil {
-		return nil, err
-	}
-
-	jobID := generateID()
-	now := time.Now().UTC()
-	job := &models.UploadJob{
-		ID:              jobID,
-		Status:          models.JobQueued,
-		Stage:           "queued",
-		CreatedAt:       now,
-		UpdatedAt:       now,
-		QueuedAt:        now,
-		FileCount:       len(stagedFiles),
-		Files:           make([]models.FileResult, 0, len(stagedFiles)),
-		Summary:         summarizeStage("queued"),
-		Detail:          "Your YouTube link was accepted and is waiting for background processing to begin.",
-		ProgressLabel:   fmt.Sprintf("0 of %d items started", len(stagedFiles)),
-		ProgressPercent: 2,
-	}
-
-	for _, file := range stagedFiles {
-		job.Files = append(job.Files, models.FileResult{
-			FileID:   file.FileID,
-			FileName: file.OriginalName,
-			Status:   "queued",
-		})
-	}
-
-	m.mu.Lock()
-	m.jobs[jobID] = job
-	jobCount := len(m.jobs)
-	m.mu.Unlock()
-
-	log.Printf("[jobs] submit youtube job=%s chat_id=%s user_id=%s files=%d in_memory_jobs=%d", jobID, chatID, userID, len(stagedFiles), jobCount)
-	m.jobQueue <- queuedJob{ID: jobID, Files: stagedFiles}
-	log.Printf("[jobs] queued youtube job=%s queue_depth=%d", jobID, len(m.jobQueue))
-	return cloneJob(job), nil
-}
-
 func (m *Manager) GetJob(jobID string) (*models.UploadJob, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
@@ -392,8 +350,8 @@ func (m *Manager) processJob(parentCtx context.Context, queued queuedJob) {
 
 	for index, file := range queued.Files {
 		stopProgress := func() {}
-		if file.DetectedKind == KindYouTube {
-			stopProgress = m.startYouTubeExtractionProgress(queued.ID, file, index, len(queued.Files))
+		if file.DetectedKind == KindVideo {
+			stopProgress = m.startVideoExtractionProgress(queued.ID, file, index, len(queued.Files))
 		} else {
 			m.setJobStageDetailed(queued.ID, "extracting", file, index, len(queued.Files), 18)
 		}
@@ -661,8 +619,8 @@ func (m *Manager) setJobStageDetailed(jobID string, stage string, file models.St
 	})
 }
 
-func (m *Manager) startYouTubeExtractionProgress(jobID string, file models.StagedFile, fileIndex int, totalFiles int) func() {
-	m.setJobStageDetailed(jobID, "downloading", file, fileIndex, totalFiles, 20)
+func (m *Manager) startVideoExtractionProgress(jobID string, file models.StagedFile, fileIndex int, totalFiles int) func() {
+	m.setJobStageDetailed(jobID, "converting", file, fileIndex, totalFiles, 20)
 
 	done := make(chan struct{})
 	go func() {
@@ -819,8 +777,8 @@ func summarizeStage(stage string) string {
 		return "Preparing your files for AI processing."
 	case "extracting":
 		return "Extracting data from your files."
-	case "downloading":
-		return "Downloading and preparing the video audio."
+	case "converting":
+		return "Converting uploaded video into transcription-ready audio."
 	case "transcribing":
 		return "Transcribing audio into searchable text. This can take a little while for longer files."
 	case "chunking":
@@ -851,8 +809,8 @@ func describeStage(stage string, currentFile string, currentKind string) string 
 		return "Preparing the upload, validating inputs, and choosing the right extraction path."
 	case "extracting":
 		return fmt.Sprintf("Extracting usable content from %s.", fileLabel)
-	case "downloading":
-		return fmt.Sprintf("Downloading the video and isolating the audio track from %s.", fileLabel)
+	case "converting":
+		return fmt.Sprintf("Converting the uploaded video %s into an audio file for transcription.", fileLabel)
 	case "transcribing":
 		return fmt.Sprintf("Converting the extracted audio from %s into searchable text.", fileLabel)
 	case "chunking":
@@ -878,8 +836,8 @@ func defaultProgressLabel(stage string) string {
 		return "Preparing job"
 	case "extracting":
 		return "Extracting content"
-	case "downloading":
-		return "Downloading video"
+	case "converting":
+		return "Converting video"
 	case "transcribing":
 		return "Transcribing audio"
 	case "chunking":
@@ -905,7 +863,7 @@ func defaultProgressPercent(stage string) int {
 		return 5
 	case "extracting":
 		return 18
-	case "downloading":
+	case "converting":
 		return 20
 	case "transcribing":
 		return 32

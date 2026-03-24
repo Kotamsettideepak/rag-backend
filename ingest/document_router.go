@@ -7,8 +7,8 @@ import (
 	"gin-backend/audio"
 	"gin-backend/extractor"
 	"gin-backend/models"
+	"gin-backend/video"
 	"gin-backend/visual"
-	"gin-backend/youtube"
 )
 
 type documentExtractor interface {
@@ -22,10 +22,10 @@ type DocumentRouter struct {
 func NewDocumentRouter() *DocumentRouter {
 	return &DocumentRouter{
 		extractors: map[string]documentExtractor{
-			KindPDF:     extractor.NewHTTPClient(),
-			KindAudio:   audio.NewHTTPClient(),
-			KindImage:   visual.NewHTTPClient(),
-			KindYouTube: youtube.NewHTTPClient(),
+			KindPDF:   extractor.NewHTTPClient(),
+			KindAudio: audio.NewHTTPClient(),
+			KindImage: visual.NewHTTPClient(),
+			KindVideo: video.NewHTTPClient(),
 		},
 	}
 }

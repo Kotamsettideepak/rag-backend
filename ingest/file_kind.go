@@ -3,10 +3,10 @@ package ingest
 import "strings"
 
 const (
-	KindPDF     = "pdf"
-	KindAudio   = "audio"
-	KindImage   = "image"
-	KindYouTube = "youtube"
+	KindPDF   = "pdf"
+	KindAudio = "audio"
+	KindImage = "image"
+	KindVideo = "video"
 )
 
 var supportedAudioExtensions = []string{
@@ -17,7 +17,18 @@ var supportedAudioExtensions = []string{
 	".ogg",
 	".flac",
 	".webm",
+}
+
+var supportedVideoExtensions = []string{
 	".mp4",
+	".mov",
+	".avi",
+	".mkv",
+	".m4v",
+	".mpeg",
+	".mpg",
+	".wmv",
+	".3gp",
 }
 
 var supportedImageExtensions = []string{
@@ -36,6 +47,8 @@ func detectKind(filename string, contentType string) string {
 	switch {
 	case strings.HasSuffix(lowerName, ".pdf"), strings.Contains(lowerType, "pdf"):
 		return KindPDF
+	case isVideoFile(lowerName, lowerType):
+		return KindVideo
 	case isAudioFile(lowerName, lowerType):
 		return KindAudio
 	case isImageFile(lowerName, lowerType):
@@ -47,11 +60,25 @@ func detectKind(filename string, contentType string) string {
 
 func isSupportedKind(kind string) bool {
 	switch kind {
-	case KindPDF, KindAudio, KindImage, KindYouTube:
+	case KindPDF, KindAudio, KindImage, KindVideo:
 		return true
 	default:
 		return false
 	}
+}
+
+func isVideoFile(filename string, contentType string) bool {
+	if strings.HasPrefix(contentType, "video/") {
+		return true
+	}
+
+	for _, extension := range supportedVideoExtensions {
+		if strings.HasSuffix(filename, extension) {
+			return true
+		}
+	}
+
+	return false
 }
 
 func isAudioFile(filename string, contentType string) bool {
