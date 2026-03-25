@@ -59,8 +59,8 @@ func (c *HTTPClient) Extract(ctx context.Context, staged model.StagedFile) (mode
 	audioStaged := staged
 	audioStaged.StoredPath = audioPath
 	audioStaged.Size = audioSize
-	audioStaged.DetectedKind = "audio"
-	audioStaged.ContentType = "audio/mpeg"
+	audioStaged.DetectedKind = "video"
+	audioStaged.ContentType = staged.ContentType
 
 	document, err := c.audioClient.Extract(ctx, audioStaged)
 	if err != nil {
@@ -68,7 +68,7 @@ func (c *HTTPClient) Extract(ctx context.Context, staged model.StagedFile) (mode
 	}
 
 	document.FileName = staged.OriginalName
-	document.FileKind = "audio"
+	document.FileKind = "video"
 	document.FileID = staged.FileID
 	document.ChatID = staged.ChatID
 	document.UserID = staged.UserID

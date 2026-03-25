@@ -85,6 +85,25 @@ func buildChunkMetadata(chunk model.Chunk) map[string]interface{} {
 		return metadata
 	}
 
+	if chunk.FileKind == "video" {
+		if strings.HasPrefix(chunk.Text, "Uploaded Video Metadata") {
+			metadata["content_type"] = "video_metadata"
+			if duration, ok := parseEstimatedDuration(chunk.Text); ok {
+				metadata["estimated_duration_sec"] = duration
+			}
+			return metadata
+		}
+		if _, exists := metadata["content_type"]; exists {
+			return metadata
+		}
+		metadata["content_type"] = "video_transcript"
+		if start, end, ok := parseSegmentRange(chunk.Text); ok {
+			metadata["segment_start"] = start
+			metadata["segment_end"] = end
+		}
+		return metadata
+	}
+
 	if chunk.FileKind != "audio" {
 		if _, exists := metadata["content_type"]; !exists {
 			metadata["content_type"] = "document"

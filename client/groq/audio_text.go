@@ -29,8 +29,12 @@ func buildAudioMetadataBlock(staged model.StagedFile, duration float64) string {
 	if duration > 0 {
 		durationLine = fmt.Sprintf("Estimated duration: %.2f seconds", duration)
 	}
+	title := "Uploaded Audio Metadata"
+	if strings.EqualFold(strings.TrimSpace(staged.DetectedKind), "video") {
+		title = "Uploaded Video Metadata"
+	}
 	lines := []string{
-		"Uploaded Audio Metadata",
+		title,
 		"Actual uploaded filename: " + strings.TrimSpace(staged.OriginalName),
 		"Detected file type: " + strings.ToUpper(strings.TrimSpace(staged.DetectedKind)),
 		"Content-Type: " + strings.TrimSpace(staged.ContentType),

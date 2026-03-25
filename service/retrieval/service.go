@@ -11,10 +11,13 @@ func BuildContextResult(question string, matches []model.SearchMatch, store *vec
 	}
 
 	audio := filterByKind(matches, ModalityAudio)
+	video := filterByKind(matches, ModalityVideo)
 	images := filterByKind(matches, ModalityImage)
 	pdfs := filterByKind(matches, ModalityPDF)
 
 	switch {
+	case len(video) > 0 && len(audio) == 0 && len(images) == 0 && len(pdfs) == 0:
+		return buildVideoResult(question, matches, store)
 	case len(audio) > 0 && len(images) == 0 && len(pdfs) == 0:
 		return buildAudioResult(question, matches, store)
 	case len(images) > 0 && len(audio) == 0 && len(pdfs) == 0:

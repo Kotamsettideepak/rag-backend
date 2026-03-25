@@ -11,23 +11,31 @@ import (
 const (
 	ModalityPDF   = "pdf"
 	ModalityAudio = "audio"
+	ModalityVideo = "video"
 	ModalityImage = "image"
 	ModalityMixed = "mixed"
 )
 
 func classifyAudioQuery(question string) audioIntent {
+	return classifyMediaQuery(question)
+}
+
+func classifyMediaQuery(question string) audioIntent {
 	low := strings.ToLower(strings.TrimSpace(question))
 	for _, kw := range []string{"lyrics", "lyric", "complete lyrics", "full lyrics"} {
 		if strings.Contains(low, kw) {
 			return intentLyrics
 		}
 	}
-	for _, kw := range []string{"what is the song about", "what's the song about", "summarize the song", "summary of the song", "meaning of the song", "story of the song"} {
+	for _, kw := range []string{
+		"what is the song about", "what's the song about", "summarize the song", "summary of the song", "meaning of the song", "story of the song",
+		"what is the video about", "what's the video about", "summarize the video", "summary of the video", "what happens in the video", "video about",
+	} {
 		if strings.Contains(low, kw) {
 			return intentSummary
 		}
 	}
-	for _, kw := range []string{"file name", "filename", "duration", "length", "song name", "title", "artist", "singer"} {
+	for _, kw := range []string{"file name", "filename", "duration", "length", "song name", "title", "artist", "singer", "video name"} {
 		if strings.Contains(low, kw) {
 			return intentMetadata
 		}

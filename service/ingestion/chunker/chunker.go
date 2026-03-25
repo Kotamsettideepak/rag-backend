@@ -32,7 +32,7 @@ func (c *Chunker) ChunkDocument(doc model.ParsedDocument) []model.Chunk {
 	var chunks []model.Chunk
 	index := 0
 
-	if doc.FileKind == "audio" && len(doc.AudioChunks) > 0 {
+	if (doc.FileKind == "audio" || doc.FileKind == "video") && len(doc.AudioChunks) > 0 {
 		chunks, index = c.chunkAudio(doc, index)
 		if len(chunks) > 0 {
 			return chunks
@@ -51,6 +51,10 @@ func (c *Chunker) ChunkDocument(doc model.ParsedDocument) []model.Chunk {
 
 func (c *Chunker) chunkAudio(doc model.ParsedDocument, index int) ([]model.Chunk, int) {
 	var chunks []model.Chunk
+	transcriptType := "audio_transcript"
+	if doc.FileKind == "video" {
+		transcriptType = "video_transcript"
+	}
 	if len(doc.PageTexts) > 0 {
 		if meta := strings.TrimSpace(doc.PageTexts[0]); meta != "" {
 			h := sha256.Sum256([]byte(meta))
@@ -74,7 +78,7 @@ func (c *Chunker) chunkAudio(doc model.ParsedDocument, index int) ([]model.Chunk
 			FileID: doc.FileID, FileName: doc.FileName, FileKind: doc.FileKind,
 			ChatID: doc.ChatID, UserID: doc.UserID, Page: index + 2, Index: index,
 			Text: text, Hash: hex.EncodeToString(h[:]),
-			Metadata: map[string]interface{}{"content_type": ac.Type, "segment_start": ac.Start, "segment_end": ac.End},
+			Metadata: map[string]interface{}{"content_type": transcriptType, "segment_start": ac.Start, "segment_end": ac.End},
 		})
 		index++
 	}
