@@ -69,22 +69,12 @@ func (c *AudioHTTPClient) Extract(ctx context.Context, staged model.StagedFile) 
 		return model.ParsedDocument{}, fmt.Errorf("GROQ_API_KEY is not configured")
 	}
 
-	log.Printf(
-		"[audio] preparing transcription file=%s kind=%s content_type=%s path=%s model=%s",
-		staged.OriginalName,
-		staged.DetectedKind,
-		staged.ContentType,
-		staged.StoredPath,
-		firstModel(c.audioModels),
-	)
-
 	fileData, err := os.ReadFile(staged.StoredPath)
 	if err != nil {
 		return model.ParsedDocument{}, err
 	}
 
 	if len(fileData) > 0 && len(fileData) <= maxTranscriptionBytes {
-		log.Printf("[audio] using direct transcription file=%s bytes=%d", staged.OriginalName, len(fileData))
 		response, err := c.transcribeFileData(ctx, fileData, staged.OriginalName, -1)
 		if err == nil {
 			duration := estimateAudioDuration(response)
@@ -92,13 +82,12 @@ func (c *AudioHTTPClient) Extract(ctx context.Context, staged model.StagedFile) 
 			documentText, pageTexts := buildAudioTexts(staged, duration, directChunks)
 
 			log.Printf(
-				"[audio] extracted file=%s mode=direct duration=%.2fs segments=%d kept_chunks=%d text_chars=%d preview=%s",
+				"[audio] extracted file=%s mode=direct duration=%.2fs segments=%d kept_chunks=%d text_chars=%d",
 				staged.OriginalName,
 				duration,
 				len(response.Segments),
 				len(directChunks),
 				len(documentText),
-				previewText(documentText, 220),
 			)
 
 			return model.ParsedDocument{
@@ -113,9 +102,9 @@ func (c *AudioHTTPClient) Extract(ctx context.Context, staged model.StagedFile) 
 			}, nil
 		}
 
-		log.Printf("[audio] direct transcription failed, falling back to chunking file=%s err=%v", staged.OriginalName, err)
+		log.Printf("[audio] direct transcription failed; falling back to chunked mode file=%s err=%v", staged.OriginalName, err)
 	} else {
-		log.Printf("[audio] file exceeds direct transcription size limit, using chunk fallback file=%s bytes=%d", staged.OriginalName, len(fileData))
+		log.Printf("[audio] file exceeds direct transcription size limit; using chunked mode file=%s bytes=%d", staged.OriginalName, len(fileData))
 	}
 
 	duration, err := probeAudioDuration(ctx, staged.StoredPath)
@@ -137,13 +126,12 @@ func (c *AudioHTTPClient) Extract(ctx context.Context, staged model.StagedFile) 
 	documentText, pageTexts := buildAudioTexts(staged, duration, mergedChunks)
 
 	log.Printf(
-		"[audio] extracted file=%s mode=chunked duration=%.2fs windows=%d kept_chunks=%d text_chars=%d preview=%s",
+		"[audio] extracted file=%s mode=chunked duration=%.2fs windows=%d kept_chunks=%d text_chars=%d",
 		staged.OriginalName,
 		duration,
 		len(windows),
 		len(mergedChunks),
 		len(documentText),
-		previewText(documentText, 220),
 	)
 
 	return model.ParsedDocument{

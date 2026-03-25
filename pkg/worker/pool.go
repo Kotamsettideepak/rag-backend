@@ -2,6 +2,7 @@ package worker
 
 import (
 	"context"
+	"log"
 	"sync"
 	"time"
 
@@ -85,9 +86,14 @@ func (p *Pool) Shutdown() {
 
 func (p *Pool) runWorker(workerID int) {
 	defer p.wg.Done()
+	processedBatches := 0
 
 	for task := range p.jobs {
 		started := time.Now()
+		processedBatches++
+		if processedBatches <= 2 || processedBatches%10 == 0 {
+			log.Printf("[submit-phase] job=%s worker=%d picked_batch=%d chunks=%d", task.JobID, workerID, processedBatches, len(task.Batch))
+		}
 		if p.rateLimiter != nil {
 			select {
 			case <-task.Ctx.Done():
@@ -107,6 +113,9 @@ func (p *Pool) runWorker(workerID int) {
 		}
 		if err != nil {
 			result.Failed = len(task.Batch)
+			log.Printf("[submit-phase] job=%s worker=%d embed_batch_failed chunks=%d err=%v", task.JobID, workerID, len(task.Batch), err)
+		} else if processedBatches <= 2 || processedBatches%10 == 0 {
+			log.Printf("[submit-phase] job=%s worker=%d finished_batch=%d chunks=%d elapsed_ms=%d", task.JobID, workerID, processedBatches, len(task.Batch), result.Duration.Milliseconds())
 		}
 
 		task.Response <- result

@@ -144,27 +144,80 @@ func (s *Service) EmbedQuery(ctx context.Context, text string) ([]float64, error
 }
 
 func (s *Service) embedBatchWithRetry(ctx context.Context, texts []string) ([][]float64, error) {
+	embeddings, err := s.embedAdaptive(ctx, texts)
+	if err != nil {
+		return nil, fmt.Errorf("batch embedding failed: %w", err)
+	}
+	return toFloat64Vectors(embeddings), nil
+}
+
+func (s *Service) embedAdaptive(ctx context.Context, texts []string) ([][]float32, error) {
+	embeddings, err := s.embedWithRetries(ctx, texts)
+	if err == nil {
+		return embeddings, nil
+	}
+	if len(texts) == 1 || !shouldSplitBatch(err) {
+		return nil, err
+	}
+
+	mid := len(texts) / 2
+	left, err := s.embedAdaptive(ctx, texts[:mid])
+	if err != nil {
+		return nil, err
+	}
+	right, err := s.embedAdaptive(ctx, texts[mid:])
+	if err != nil {
+		return nil, err
+	}
+	return append(left, right...), nil
+}
+
+func (s *Service) embedWithRetries(ctx context.Context, texts []string) ([][]float32, error) {
 	var lastErr error
 	for attempt := 1; attempt <= s.maxRetries; attempt++ {
 		embeddings, err := s.client.Embed(ctx, texts)
 		if err == nil {
-			return toFloat64Vectors(embeddings), nil
+			return embeddings, nil
 		}
 
 		lastErr = err
-
 		if attempt == s.maxRetries {
 			break
+		}
+
+		delay := s.retryBackoff * time.Duration(attempt)
+		if isRateLimitError(err) {
+			delay *= 2
 		}
 
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(s.retryBackoff * time.Duration(attempt)):
+		case <-time.After(delay):
 		}
 	}
+	return nil, lastErr
+}
 
-	return nil, fmt.Errorf("batch embedding failed after %d attempts: %w", s.maxRetries, lastErr)
+func shouldSplitBatch(err error) bool {
+	return isPayloadLimitError(err) || isRateLimitError(err)
+}
+
+func isPayloadLimitError(err error) bool {
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "payload") ||
+		strings.Contains(lower, "token") ||
+		strings.Contains(lower, "input too large") ||
+		strings.Contains(lower, "context length") ||
+		strings.Contains(lower, "request too large") ||
+		strings.Contains(lower, "status 413")
+}
+
+func isRateLimitError(err error) bool {
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "too many requests") ||
+		strings.Contains(lower, "status 429")
 }
 
 func toFloat64Vectors(vectors [][]float32) [][]float64 {

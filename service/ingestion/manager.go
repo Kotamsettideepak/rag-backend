@@ -34,9 +34,11 @@ type Manager struct {
 	mu             sync.RWMutex
 	cancel         context.CancelFunc
 	wg             sync.WaitGroup
-	batchSize      int
 	storeBatchSize int
 	queryTopK      int
+	chunkQueueSize int
+	resultBufSize  int
+	embedPolicy    embedBatchPolicy
 }
 
 type queuedJob struct {
@@ -54,15 +56,17 @@ func NewManager(svc *embedding.Service) *Manager {
 		store:          vector.NewRepository(),
 		jobs:           make(map[string]*model.UploadJob),
 		jobSubs:        make(map[string]map[string]chan *model.UploadJob),
-		batchSize:      envInt("INGEST_BATCH_SIZE", 8),
 		storeBatchSize: envInt("STORE_BATCH_SIZE", 64),
 		queryTopK:      envInt("QUERY_TOP_K", 10),
+		embedPolicy:    loadEmbedBatchPolicy(),
 	}
 
 	workers := envInt("INGEST_WORKERS", 8)
 	queueSz := envInt("INGEST_QUEUE_SIZE", workers*8)
 	rateLimit := envInt("EMBED_RATE_LIMIT_PER_SECOND", 0)
 	m.pool = worker.NewPool(svc, workers, queueSz, rateLimit)
+	m.chunkQueueSize = envInt("INGEST_CHUNK_QUEUE_SIZE", workers*12)
+	m.resultBufSize = envInt("INGEST_VECTOR_QUEUE_SIZE", workers*8)
 	m.jobQueue = make(chan queuedJob, envInt("JOB_QUEUE_SIZE", 64))
 
 	ctx, cancel := context.WithCancel(context.Background())

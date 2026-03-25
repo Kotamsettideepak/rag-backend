@@ -18,6 +18,7 @@ type UploadJobStatus string
 const (
 	JobQueued     UploadJobStatus = "queued"
 	JobProcessing UploadJobStatus = "processing"
+	JobChatReady  UploadJobStatus = "chat_ready"
 	JobCompleted  UploadJobStatus = "completed"
 	JobFailed     UploadJobStatus = "failed"
 )
@@ -60,12 +61,15 @@ type UploadJob struct {
 	UpdatedAt       time.Time       `json:"updated_at"`
 	QueuedAt        time.Time       `json:"queued_at"`
 	StartedAt       *time.Time      `json:"started_at,omitempty"`
+	ChatReadyAt     *time.Time      `json:"chat_ready_at,omitempty"`
 	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
 	FileCount       int             `json:"file_count"`
 	Files           []FileResult    `json:"files"`
 	TotalChunks     int             `json:"total_chunks"`
+	IndexedChunks   int             `json:"indexed_chunks"`
 	CompletedChunks int             `json:"completed_chunks"`
 	FailedChunks    int             `json:"failed_chunks"`
+	ChatReady       bool            `json:"chat_ready"`
 	Stage           string          `json:"stage,omitempty"`
 	Summary         string          `json:"summary,omitempty"`
 	Detail          string          `json:"detail,omitempty"`

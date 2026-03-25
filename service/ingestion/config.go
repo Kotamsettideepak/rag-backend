@@ -22,6 +22,7 @@ func stageLabel(stage string) string {
 	labels := map[string]string{
 		"queued":       "Queued. Waiting to start processing.",
 		"processing":   "Preparing your files for AI processing.",
+		"chat_ready":   "Initial content is indexed. You can start chatting while the rest is still being processed.",
 		"extracting":   "Extracting data from your files.",
 		"converting":   "Converting uploaded video into audio.",
 		"transcribing": "Transcribing audio into searchable text.",

@@ -116,23 +116,25 @@ func buildAudioMultipartBody(fileData []byte, fileName, modelName string) ([]byt
 }
 
 func logTranscriptionRequest(endpoint, fileName string, chunkIndex, attempt int, modelName string, size int) {
-	if chunkIndex >= 0 {
-		log.Printf("[audio] sending Groq transcription request url=%s file=%s chunk=%d attempt=%d model=%s bytes=%d",
-			endpoint, filepath.Base(fileName), chunkIndex, attempt, modelName, size)
-		return
-	}
-	log.Printf("[audio] sending Groq transcription request url=%s file=%s mode=direct attempt=%d model=%s bytes=%d",
-		endpoint, filepath.Base(fileName), attempt, modelName, size)
+	_ = endpoint
+	_ = fileName
+	_ = chunkIndex
+	_ = attempt
+	_ = modelName
+	_ = size
 }
 
 func logTranscriptionResponse(status int, fileName string, chunkIndex, attempt int, body []byte) {
-	if chunkIndex >= 0 {
-		log.Printf("[audio] response status=%d file=%s chunk=%d attempt=%d body=%s",
-			status, fileName, chunkIndex, attempt, strings.TrimSpace(string(body)))
+	if status == http.StatusOK {
 		return
 	}
-	log.Printf("[audio] response status=%d file=%s mode=direct attempt=%d body=%s",
-		status, fileName, attempt, strings.TrimSpace(string(body)))
+	if chunkIndex >= 0 {
+		log.Printf("[audio] transcription request failed status=%d file=%s chunk=%d attempt=%d body_bytes=%d",
+			status, fileName, chunkIndex, attempt, len(body))
+		return
+	}
+	log.Printf("[audio] transcription request failed status=%d file=%s mode=direct attempt=%d body_bytes=%d",
+		status, fileName, attempt, len(body))
 }
 
 func (c *AudioHTTPClient) waitForTranscriptionSlot(ctx context.Context) error {
