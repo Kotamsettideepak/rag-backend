@@ -1,34 +1,35 @@
 package routes
 
 import (
-	"gin-backend/api"
+	"gin-backend/handler/chat"
+	"gin-backend/handler/upload"
+	"gin-backend/handler/voice"
 
 	"github.com/gin-gonic/gin"
 )
 
-func RegisterRoutes(r *gin.Engine) {
-	r.GET("/", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "Server working",
-		})
-	})
+// Register wires all routes onto the engine.
+func Register(r *gin.Engine) {
+	r.GET("/", func(c *gin.Context) { c.JSON(200, gin.H{"message": "Server working"}) })
+	r.GET("/ping", func(c *gin.Context) { c.JSON(200, gin.H{"message": "pong"}) })
 
-	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong",
-		})
-	})
+	// Upload
+	r.POST("/upload", upload.UploadHandler)
+	r.GET("/status/:job_id", upload.StatusHandler)
+	r.GET("/ws/status/:job_id", upload.UploadWSHandler)
 
-	r.POST("/upload", api.UploadHandler)
-	r.GET("/status/:job_id", api.StatusHandler)
-	r.GET("/ws/status/:job_id", api.UploadStatusWebSocketHandler)
-	r.POST("/chat/create", api.CreateChatHandler)
-	r.GET("/chat/list", api.ListChatsHandler)
-	r.GET("/chat/:chat_id/messages", api.ChatMessagesHandler)
-	r.GET("/chat/:chat_id/uploads", api.ChatUploadsHandler)
-	r.DELETE("/chat/:chat_id", api.DeleteChatHandler)
-	r.POST("/chat", api.ChatHandler)
-	r.POST("/voice/chat", api.VoiceChatHandler)
-	r.GET("/ws", api.ChatWebSocketHandler)
-	r.DELETE("/context", api.ClearContextHandler)
+	// Chat (REST)
+	r.POST("/chat/create", chat.CreateChatHandler)
+	r.GET("/chat/list", chat.ListChatsHandler)
+	r.GET("/chat/:chat_id/messages", chat.ChatMessagesHandler)
+	r.GET("/chat/:chat_id/uploads", chat.ChatUploadsHandler)
+	r.DELETE("/chat/:chat_id", chat.DeleteChatHandler)
+	r.POST("/chat", chat.ChatHandler)
+	r.DELETE("/context", chat.ClearContextHandler)
+
+	// Chat (WebSocket streaming)
+	r.GET("/ws", chat.WebSocketHandler)
+
+	// Voice
+	r.POST("/voice/chat", voice.VoiceChatHandler)
 }

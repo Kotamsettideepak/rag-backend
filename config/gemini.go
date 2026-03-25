@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	defaultGeminiModel   = "gemini-2.5-flash"
+	defaultGeminiModel = "gemini-2.5-flash"
 )
 
 func GetGeminiAPIKey() string {

@@ -3,140 +3,133 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	"gin-backend/config"
-	"gin-backend/embedding"
-	"gin-backend/ingest"
+	"gin-backend/middleware"
+	"gin-backend/repository"
 	"gin-backend/routes"
-	"gin-backend/store"
+	"gin-backend/service/ingestion"
+	"gin-backend/service/ingestion/embedding"
 
 	"github.com/gin-gonic/gin"
 )
 
 func main() {
-	log.SetOutput(io.Discard)
-	log.SetFlags(0)
-	gin.DefaultWriter = io.Discard
-	gin.DefaultErrorWriter = io.Discard
-	gin.SetMode(gin.ReleaseMode)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
-	if err := config.LoadEnvFile(".env"); err != nil {
-		if !os.IsNotExist(err) {
-			fatalf("[startup] failed to load .env: %v", err)
+	if err := config.LoadEnvFile(".env"); err != nil && !os.IsNotExist(err) {
+		fatalf("[startup] failed to load .env: %v", err)
+	}
+	configureLogging()
+
+	for _, check := range []struct {
+		name string
+		fn   func() error
+	}{
+		{"server", config.ValidateServerConfig},
+		{"groq", config.ValidateGroqConfig},
+		{"jina", config.ValidateJinaConfig},
+		{"deepgram", config.ValidateDeepgramConfig},
+		{"gemini", config.ValidateGeminiConfig},
+		{"cloudinary", config.ValidateCloudinaryConfig},
+		{"extractor", config.ValidateExtractorConfig},
+	} {
+		if err := check.fn(); err != nil {
+			fatalf("[startup] invalid %s config: %v", check.name, err)
 		}
 	}
-	if err := config.ValidateServerConfig(); err != nil {
-		fatalf("[startup] invalid server config: %v", err)
-	}
-	if err := config.ValidateGroqConfig(); err != nil {
-		fatalf("[startup] invalid groq config: %v", err)
-	}
-	if err := config.ValidateJinaConfig(); err != nil {
-		fatalf("[startup] invalid jina config: %v", err)
-	}
-	if err := config.ValidateDeepgramConfig(); err != nil {
-		fatalf("[startup] invalid deepgram config: %v", err)
-	}
-	if err := config.ValidateGeminiConfig(); err != nil {
-		fatalf("[startup] invalid gemini config: %v", err)
-	}
-	if err := config.ValidateCloudinaryConfig(); err != nil {
-		fatalf("[startup] invalid cloudinary config: %v", err)
-	}
-
-	serverAddr := config.GetServerAddr()
 
 	if err := config.EnsureChromaRunning(); err != nil {
-		fatalf("[startup] failed to ensure chroma is running: %v", err)
+		fatalf("[startup] chroma not reachable: %v", err)
 	}
-	if err := config.ValidateExtractorConfig(); err != nil {
-		fatalf("[startup] invalid extractor config: %v", err)
+	if err := repository.InitDefault(context.Background()); err != nil {
+		fatalf("[startup] postgres init failed: %v", err)
 	}
-
-	if err := store.InitDefaultStore(context.Background()); err != nil {
-		fatalf("[startup] failed to initialize postgres store: %v", err)
-	}
-	defer store.DefaultStore().Close()
+	defer repository.Default().Close()
 
 	apiKeys := config.GetJinaAPIKeys()
 	if len(apiKeys) == 0 {
 		fatalf("[startup] at least one JINA_API_KEY is required")
 	}
-
-	embeddingRepo := embedding.NewJinaEmbeddingRepository(apiKeys)
-	embeddingService := embedding.NewService(embeddingRepo)
-	manager := ingest.NewManager(embeddingService)
-	ingest.SetDefaultManager(manager)
-	defer manager.Shutdown()
+	mgr := ingestion.NewManager(embedding.NewService(embedding.NewJinaRepository(apiKeys)))
+	ingestion.SetDefaultManager(mgr)
+	defer mgr.Shutdown()
 
 	router := gin.New()
+	if gin.Mode() != gin.ReleaseMode {
+		router.Use(gin.Logger())
+	}
 	router.Use(gin.Recovery())
-	router.MaxMultipartMemory = getEnvBytes("MAX_UPLOAD_SIZE_MB", 300)
-	router.Use(corsMiddleware())
+	router.Use(middleware.CORS())
+	router.MaxMultipartMemory = envMB("MAX_UPLOAD_SIZE_MB", 300)
+	routes.Register(router)
 
-	routes.RegisterRoutes(router)
-
-	server := &http.Server{
-		Addr:    serverAddr,
+	srv := &http.Server{
+		Addr:    config.GetServerAddr(),
 		Handler: router,
 	}
-
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fatalf("[startup] server failed: %v", err)
 		}
 	}()
 
-	waitForShutdown(server)
+	gracefulShutdown(srv)
 }
 
-func corsMiddleware() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")
-		c.Writer.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
-		if c.Request.Method == http.MethodOptions {
-			c.AbortWithStatus(http.StatusNoContent)
-			return
-		}
-		c.Next()
+func configureLogging() {
+	if isProductionLogging() {
+		gin.SetMode(gin.ReleaseMode)
+		return
 	}
+
+	gin.SetMode(gin.DebugMode)
+	gin.DefaultWriter = os.Stdout
+	gin.DefaultErrorWriter = os.Stderr
+	log.SetOutput(os.Stdout)
 }
 
-func waitForShutdown(server *http.Server) {
+func isProductionLogging() bool {
+	for _, key := range []string{"APP_ENV", "ENV", "GIN_MODE"} {
+		value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+		if value == "production" || value == "release" {
+			return true
+		}
+	}
+	return false
+}
+
+func gracefulShutdown(srv *http.Server) {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
-
 	<-stop
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	if err := server.Shutdown(ctx); err != nil {
-		fatalf("[shutdown] graceful server shutdown failed: %v", err)
+	if err := srv.Shutdown(ctx); err != nil {
+		fatalf("[shutdown] graceful shutdown failed: %v", err)
 	}
 }
 
-func getEnvBytes(key string, fallbackMB int64) int64 {
+func envMB(key string, fallbackMB int64) int64 {
 	raw := os.Getenv(key)
 	if raw == "" {
 		return fallbackMB << 20
 	}
-
-	value, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || value <= 0 {
+	v, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || v <= 0 {
 		return fallbackMB << 20
 	}
-
-	return value << 20
+	return v << 20
 }
 
 func fatalf(format string, args ...interface{}) {
