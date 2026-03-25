@@ -32,57 +32,62 @@ func (c *AudioHTTPClient) transcribeChunkFile(ctx context.Context, chunkPath, _ 
 }
 
 func (c *AudioHTTPClient) transcribeFileData(ctx context.Context, fileData []byte, fileName string, chunkIndex int) (transcriptionResponse, error) {
-	body, contentType, err := buildAudioMultipartBody(fileData, fileName, c.audioModel)
-	if err != nil {
-		return transcriptionResponse{}, err
-	}
 	endpoint := c.baseURL + "/audio/transcriptions"
-	for attempt := 1; attempt <= c.maxRetries; attempt++ {
-		if chunkIndex >= 0 {
-			if err := c.waitForTranscriptionSlot(ctx); err != nil {
-				return transcriptionResponse{}, err
-			}
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	var lastErr error
+	for _, modelName := range c.audioModels {
+		body, contentType, err := buildAudioMultipartBody(fileData, fileName, modelName)
 		if err != nil {
 			return transcriptionResponse{}, err
 		}
-		req.Header.Set("Content-Type", contentType)
-		req.Header.Set("Authorization", "Bearer "+c.apiKey)
-		logTranscriptionRequest(endpoint, fileName, chunkIndex, attempt, c.audioModel, len(fileData))
+		for attempt := 1; attempt <= c.maxRetries; attempt++ {
+			if chunkIndex >= 0 {
+				if err := c.waitForTranscriptionSlot(ctx); err != nil {
+					return transcriptionResponse{}, err
+				}
+			}
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+			if err != nil {
+				return transcriptionResponse{}, err
+			}
+			req.Header.Set("Content-Type", contentType)
+			req.Header.Set("Authorization", "Bearer "+c.apiKey)
+			logTranscriptionRequest(endpoint, fileName, chunkIndex, attempt, modelName, len(fileData))
 
-		resp, err := c.client.Do(req)
-		if err != nil {
-			if attempt == c.maxRetries {
-				return transcriptionResponse{}, err
+			resp, err := c.client.Do(req)
+			if err != nil {
+				lastErr = err
+				if attempt == c.maxRetries {
+					break
+				}
+				if err := waitForRetry(ctx, time.Duration(attempt)*2*time.Second); err != nil {
+					return transcriptionResponse{}, err
+				}
+				continue
 			}
-			if err := waitForRetry(ctx, time.Duration(attempt)*2*time.Second); err != nil {
-				return transcriptionResponse{}, err
-			}
-			continue
-		}
 
-		responseBody, readErr := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if readErr != nil {
-			return transcriptionResponse{}, readErr
-		}
-		logTranscriptionResponse(resp.StatusCode, fileName, chunkIndex, attempt, responseBody)
-		if resp.StatusCode == http.StatusOK {
-			var parsed transcriptionResponse
-			if err := json.Unmarshal(responseBody, &parsed); err != nil {
+			responseBody, readErr := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if readErr != nil {
+				return transcriptionResponse{}, readErr
+			}
+			logTranscriptionResponse(resp.StatusCode, fileName, chunkIndex, attempt, responseBody)
+			if resp.StatusCode == http.StatusOK {
+				var parsed transcriptionResponse
+				if err := json.Unmarshal(responseBody, &parsed); err != nil {
+					return transcriptionResponse{}, err
+				}
+				return parsed, nil
+			}
+			lastErr = fmt.Errorf("groq transcription failed model=%s with status %d: %s", modelName, resp.StatusCode, string(responseBody))
+			if !shouldRetryTranscription(resp.StatusCode) || attempt == c.maxRetries {
+				break
+			}
+			if err := waitForRetry(ctx, transcriptionRetryDelay(resp.Header.Get("Retry-After"), responseBody, attempt)); err != nil {
 				return transcriptionResponse{}, err
 			}
-			return parsed, nil
-		}
-		if !shouldRetryTranscription(resp.StatusCode) || attempt == c.maxRetries {
-			return transcriptionResponse{}, fmt.Errorf("groq transcription failed with status %d: %s", resp.StatusCode, string(responseBody))
-		}
-		if err := waitForRetry(ctx, transcriptionRetryDelay(resp.Header.Get("Retry-After"), responseBody, attempt)); err != nil {
-			return transcriptionResponse{}, err
 		}
 	}
-	return transcriptionResponse{}, fmt.Errorf("groq transcription failed after %d attempts", c.maxRetries)
+	return transcriptionResponse{}, fmt.Errorf("groq transcription failed after %d attempts across models: %w", c.maxRetries, lastErr)
 }
 
 func buildAudioMultipartBody(fileData []byte, fileName, modelName string) ([]byte, string, error) {

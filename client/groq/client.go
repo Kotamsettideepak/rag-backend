@@ -29,7 +29,7 @@ type LLMClient interface {
 type Client struct {
 	baseURL    string
 	apiKey     string
-	model      string
+	models     []string
 	maxRetries int
 	client     *http.Client
 }
@@ -81,7 +81,7 @@ func NewClient() LLMClient {
 	return &Client{
 		baseURL:    baseURL,
 		apiKey:     strings.TrimSpace(os.Getenv("GROQ_API_KEY")),
-		model:      model,
+		models:     uniqueModels(model, config.GetGroqFallbackModels()),
 		maxRetries: maxRetries,
 		client:     &http.Client{Timeout: timeout},
 	}
@@ -97,7 +97,6 @@ func CurrentModel() string {
 
 func (g *Client) GenerateResponse(messages []Message) (string, error) {
 	body, err := g.doChatCompletion(context.Background(), chatCompletionRequest{
-		Model:    g.model,
 		Messages: messages,
 	})
 	if err != nil {
@@ -117,7 +116,6 @@ func (g *Client) GenerateResponse(messages []Message) (string, error) {
 
 func (g *Client) StreamResponse(messages []Message, stream chan string) error {
 	return g.doChatCompletionStream(context.Background(), chatCompletionRequest{
-		Model:    g.model,
 		Messages: messages,
 		Stream:   true,
 	}, stream)

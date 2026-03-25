@@ -27,7 +27,7 @@ type AudioClient interface {
 
 type AudioHTTPClient struct {
 	baseURL         string
-	audioModel      string
+	audioModels     []string
 	apiKey          string
 	client          *http.Client
 	requestInterval time.Duration
@@ -56,7 +56,7 @@ type audioWindow struct {
 func NewAudioClient() AudioClient {
 	return &AudioHTTPClient{
 		baseURL:         config.GetGroqBaseURL(),
-		audioModel:      config.GetGroqAudioModel(),
+		audioModels:     uniqueModels(config.GetGroqAudioModel(), config.GetGroqAudioFallbackModels()),
 		apiKey:          config.GetGroqAPIKey(),
 		client:          &http.Client{Timeout: config.GetGroqTimeout()},
 		requestInterval: config.GetGroqAudioRequestInterval(),
@@ -75,7 +75,7 @@ func (c *AudioHTTPClient) Extract(ctx context.Context, staged model.StagedFile) 
 		staged.DetectedKind,
 		staged.ContentType,
 		staged.StoredPath,
-		c.audioModel,
+		firstModel(c.audioModels),
 	)
 
 	fileData, err := os.ReadFile(staged.StoredPath)

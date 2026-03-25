@@ -14,33 +14,39 @@ func (g *Client) doChatCompletion(ctx context.Context, payload chatCompletionReq
 	if g.apiKey == "" {
 		return nil, fmt.Errorf("GROQ_API_KEY is required")
 	}
-	requestBody, err := json.Marshal(payload)
-	if err != nil {
-		return nil, err
-	}
-
 	var lastErr error
-	for attempt := 1; attempt <= g.maxRetries; attempt++ {
-		resp, err := g.doRequest(ctx, requestBody)
-		if err == nil {
-			body, readErr := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if readErr != nil {
-				return nil, readErr
-			}
-			if resp.StatusCode == http.StatusOK {
-				return body, nil
-			}
-			lastErr = fmt.Errorf("groq chat completion failed with status %d: %s", resp.StatusCode, string(body))
-			if !shouldRetry(resp.StatusCode) || attempt == g.maxRetries {
-				return nil, lastErr
-			}
-			time.Sleep(retryDelay(resp.Header.Get("Retry-After"), attempt))
-			continue
+	for _, modelName := range g.models {
+		requestBody, err := json.Marshal(chatCompletionRequest{
+			Model:    modelName,
+			Messages: payload.Messages,
+			Stream:   payload.Stream,
+		})
+		if err != nil {
+			return nil, err
 		}
-		lastErr = err
-		if attempt < g.maxRetries {
-			time.Sleep(retryDelay("", attempt))
+
+		for attempt := 1; attempt <= g.maxRetries; attempt++ {
+			resp, err := g.doRequest(ctx, requestBody)
+			if err == nil {
+				body, readErr := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if readErr != nil {
+					return nil, readErr
+				}
+				if resp.StatusCode == http.StatusOK {
+					return body, nil
+				}
+				lastErr = fmt.Errorf("groq chat completion failed model=%s with status %d: %s", modelName, resp.StatusCode, string(body))
+				if !shouldRetry(resp.StatusCode) || attempt == g.maxRetries {
+					break
+				}
+				time.Sleep(retryDelay(resp.Header.Get("Retry-After"), attempt))
+				continue
+			}
+			lastErr = err
+			if attempt < g.maxRetries {
+				time.Sleep(retryDelay("", attempt))
+			}
 		}
 	}
 	return nil, fmt.Errorf("groq request failed after %d attempts: %w", g.maxRetries, lastErr)

@@ -28,6 +28,10 @@ func GetGeminiModel() string {
 	return model
 }
 
+func GetGeminiFallbackModels() []string {
+	return parseModelList(os.Getenv("GEMINI_FALLBACK_MODELS"))
+}
+
 func GetGeminiTimeout() time.Duration {
 	raw := strings.TrimSpace(os.Getenv("GEMINI_TIMEOUT_SECONDS"))
 	if raw == "" {

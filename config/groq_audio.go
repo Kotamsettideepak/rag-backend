@@ -26,6 +26,14 @@ func GetGroqAudioModel() string {
 	return model
 }
 
+func GetGroqFallbackModels() []string {
+	return parseModelList(os.Getenv("GROQ_FALLBACK_MODELS"))
+}
+
+func GetGroqAudioFallbackModels() []string {
+	return parseModelList(os.Getenv("GROQ_AUDIO_FALLBACK_MODELS"))
+}
+
 func GetGroqTimeout() time.Duration {
 	raw := strings.TrimSpace(os.Getenv("GROQ_TIMEOUT_SECONDS"))
 	if raw == "" {

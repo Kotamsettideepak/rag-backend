@@ -5,14 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"gin-backend/config"
+	"gin-backend/model"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"gin-backend/config"
-	"gin-backend/model"
 )
 
 type Client interface {
@@ -21,7 +21,7 @@ type Client interface {
 
 type HTTPClient struct {
 	baseURL string
-	model   string
+	models  []string
 	apiKey  string
 	client  *http.Client
 }
@@ -65,7 +65,7 @@ type imageAnalysisResult struct {
 func NewClient() Client {
 	return &HTTPClient{
 		baseURL: config.GetGeminiBaseURL(),
-		model:   config.GetGeminiModel(),
+		models:  uniqueModels(config.GetGeminiModel(), config.GetGeminiFallbackModels()),
 		apiKey:  config.GetGeminiAPIKey(),
 		client:  &http.Client{Timeout: config.GetGeminiTimeout()},
 	}
@@ -94,51 +94,14 @@ func (c *HTTPClient) Extract(ctx context.Context, staged model.StagedFile) (mode
 		return model.ParsedDocument{}, err
 	}
 
-	endpoint := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, c.model, c.apiKey)
-	log.Printf(
-		"[visual] sending Gemini request url=%s/models/%s:generateContent filename=%s model=%s mime_type=%s bytes=%d",
-		c.baseURL,
-		c.model,
-		filepath.Base(staged.OriginalName),
-		c.model,
-		detectImageMIMEType(staged),
-		len(fileData),
-	)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(requestBody))
-	if err != nil {
-		return model.ParsedDocument{}, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-goog-api-key", c.apiKey)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return model.ParsedDocument{}, err
-	}
-	defer resp.Body.Close()
-
-	responseBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return model.ParsedDocument{}, err
-	}
-	log.Printf("[visual] response status=%d file=%s body=%s", resp.StatusCode, staged.OriginalName, strings.TrimSpace(string(responseBody)))
-	if resp.StatusCode != http.StatusOK {
-		return model.ParsedDocument{}, fmt.Errorf("gemini image analysis failed with status %d: %s", resp.StatusCode, string(responseBody))
-	}
-
-	var parsed generateContentResponse
-	if err := json.Unmarshal(responseBody, &parsed); err != nil {
-		return model.ParsedDocument{}, err
-	}
-
-	result, err := parseGeminiResponse(parsed)
+	result, usedModel, err := c.generateAnalysis(ctx, staged, requestBody)
 	if err != nil {
 		return model.ParsedDocument{}, err
 	}
 	log.Printf(
-		"[visual] parsed Gemini response file=%s objects=%d colors=%d relationships=%d text_in_image=%d caption_present=%t description_present=%t summary_present=%t",
+		"[visual] parsed Gemini response file=%s model=%s objects=%d colors=%d relationships=%d text_in_image=%d caption_present=%t description_present=%t summary_present=%t",
 		staged.OriginalName,
+		usedModel,
 		len(result.Objects),
 		len(result.Colors),
 		len(result.Relationships),
@@ -168,4 +131,62 @@ func (c *HTTPClient) Extract(ctx context.Context, staged model.StagedFile) (mode
 		ChatID:    staged.ChatID,
 		UserID:    staged.UserID,
 	}, nil
+}
+
+func (c *HTTPClient) generateAnalysis(ctx context.Context, staged model.StagedFile, requestBody []byte) (imageAnalysisResult, string, error) {
+	var lastErr error
+	for _, modelName := range c.models {
+		endpoint := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, modelName, c.apiKey)
+		log.Printf(
+			"[visual] sending Gemini request url=%s/models/%s:generateContent filename=%s model=%s mime_type=%s bytes=%d",
+			c.baseURL,
+			modelName,
+			filepath.Base(staged.OriginalName),
+			modelName,
+			detectImageMIMEType(staged),
+			len(requestBody),
+		)
+
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(requestBody))
+		if err != nil {
+			return imageAnalysisResult{}, "", err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("x-goog-api-key", c.apiKey)
+
+		resp, err := c.client.Do(req)
+		if err != nil {
+			lastErr = err
+			if ctx.Err() != nil {
+				return imageAnalysisResult{}, "", ctx.Err()
+			}
+			log.Printf("[visual] Gemini model failed file=%s model=%s err=%v", staged.OriginalName, modelName, err)
+			continue
+		}
+
+		responseBody, readErr := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if readErr != nil {
+			return imageAnalysisResult{}, "", readErr
+		}
+		log.Printf("[visual] response status=%d file=%s model=%s body=%s", resp.StatusCode, staged.OriginalName, modelName, strings.TrimSpace(string(responseBody)))
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("gemini image analysis failed with status %d: %s", resp.StatusCode, string(responseBody))
+			log.Printf("[visual] Gemini model failed file=%s model=%s status=%d", staged.OriginalName, modelName, resp.StatusCode)
+			continue
+		}
+
+		var parsed generateContentResponse
+		if err := json.Unmarshal(responseBody, &parsed); err != nil {
+			lastErr = err
+			continue
+		}
+		result, err := parseGeminiResponse(parsed)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return result, modelName, nil
+	}
+	return imageAnalysisResult{}, "", lastErr
 }

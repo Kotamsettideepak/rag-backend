@@ -15,35 +15,41 @@ func (g *Client) doChatCompletionStream(ctx context.Context, payload chatComplet
 	if g.apiKey == "" {
 		return fmt.Errorf("GROQ_API_KEY is required")
 	}
-	requestBody, err := json.Marshal(payload)
-	if err != nil {
-		return err
-	}
-
 	var lastErr error
-	for attempt := 1; attempt <= g.maxRetries; attempt++ {
-		resp, err := g.doRequest(ctx, requestBody)
-		if err == nil {
-			if resp.StatusCode != http.StatusOK {
-				body, _ := io.ReadAll(resp.Body)
-				resp.Body.Close()
-				lastErr = fmt.Errorf("groq streaming failed with status %d: %s", resp.StatusCode, string(body))
-				if !shouldRetry(resp.StatusCode) || attempt == g.maxRetries {
-					return lastErr
-				}
-				time.Sleep(retryDelay(resp.Header.Get("Retry-After"), attempt))
-				continue
-			}
-			lastErr = parseStream(resp.Body, stream)
-			resp.Body.Close()
-			if lastErr == nil {
-				return nil
-			}
-		} else {
-			lastErr = err
+	for _, modelName := range g.models {
+		requestBody, err := json.Marshal(chatCompletionRequest{
+			Model:    modelName,
+			Messages: payload.Messages,
+			Stream:   payload.Stream,
+		})
+		if err != nil {
+			return err
 		}
-		if attempt < g.maxRetries {
-			time.Sleep(retryDelay("", attempt))
+
+		for attempt := 1; attempt <= g.maxRetries; attempt++ {
+			resp, err := g.doRequest(ctx, requestBody)
+			if err == nil {
+				if resp.StatusCode != http.StatusOK {
+					body, _ := io.ReadAll(resp.Body)
+					resp.Body.Close()
+					lastErr = fmt.Errorf("groq streaming failed model=%s with status %d: %s", modelName, resp.StatusCode, string(body))
+					if !shouldRetry(resp.StatusCode) || attempt == g.maxRetries {
+						break
+					}
+					time.Sleep(retryDelay(resp.Header.Get("Retry-After"), attempt))
+					continue
+				}
+				lastErr = parseStream(resp.Body, stream)
+				resp.Body.Close()
+				if lastErr == nil {
+					return nil
+				}
+			} else {
+				lastErr = err
+			}
+			if attempt < g.maxRetries {
+				time.Sleep(retryDelay("", attempt))
+			}
 		}
 	}
 	return fmt.Errorf("groq stream failed after %d attempts: %w", g.maxRetries, lastErr)
