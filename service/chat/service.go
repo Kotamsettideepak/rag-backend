@@ -15,10 +15,7 @@ type Service struct {
 }
 
 type VoiceResult struct {
-	Transcript    string
-	Answer        string
-	AudioBase64   string
-	AudioMimeType string
+	Transcript string
 }
 
 func NewService() *Service {

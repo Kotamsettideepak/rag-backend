@@ -40,11 +40,10 @@ func VoiceChatHandler(c *gin.Context) {
 		return
 	}
 
-	chatID := strings.TrimSpace(c.PostForm("chat_id"))
 	result, err := chatservice.Default().VoiceAnswer(
 		c.Request.Context(),
 		user.ID,
-		chatID,
+		"",
 		file.Filename,
 		file.Header.Get("Content-Type"),
 		payload,
@@ -63,9 +62,6 @@ func VoiceChatHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"transcript":      result.Transcript,
-		"answer":          result.Answer,
-		"audio_base64":    result.AudioBase64,
-		"audio_mime_type": result.AudioMimeType,
+		"transcript": result.Transcript,
 	})
 }
