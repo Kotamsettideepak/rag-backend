@@ -21,6 +21,8 @@ const (
 	KindAudio = "audio"
 	KindImage = "image"
 	KindVideo = "video"
+
+	maxVideoUploadBytes = 150 << 20
 )
 
 // Parser stages uploaded files to disk and optionally uploads to Cloudinary.
@@ -51,6 +53,9 @@ func (p *Parser) StageFiles(files []*multipart.FileHeader, chatID, userID string
 			if pdfCount > 1 {
 				return nil, fmt.Errorf("only one PDF can be uploaded at a time")
 			}
+		}
+		if kind == KindVideo && file.Size > maxVideoUploadBytes {
+			return nil, fmt.Errorf("upload video less than 150 MB")
 		}
 		fileID := uuid.NewString()
 		storedName := fileID + "_" + sanitize(file.Filename)

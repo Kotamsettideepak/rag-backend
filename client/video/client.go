@@ -19,6 +19,7 @@ const (
 	outputSampleRate  = "16000"
 	outputChannels    = "1"
 	maxVideoDuration  = 3600.0
+	maxVideoUploadMB  = 150
 )
 
 type Client interface {
@@ -36,8 +37,8 @@ func NewClient() Client {
 }
 
 func (c *HTTPClient) Extract(ctx context.Context, staged model.StagedFile) (model.ParsedDocument, error) {
-	if staged.Size > 300*1024*1024 {
-		return model.ParsedDocument{}, fmt.Errorf("upload video less than 300 MB")
+	if staged.Size > maxVideoUploadMB*1024*1024 {
+		return model.ParsedDocument{}, fmt.Errorf("upload video less than %d MB", maxVideoUploadMB)
 	}
 
 	duration, err := probeMediaDuration(ctx, staged.StoredPath)
