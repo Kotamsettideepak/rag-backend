@@ -41,7 +41,7 @@ func (m *Manager) runStreamingIngestion(parentCtx context.Context, cancel contex
 		close(resultCh)
 	}()
 
-	storeStats, storeErr := m.collectAndStore(parentCtx, cancel, queued.ID, resultCh)
+	storeStats, storeErr := m.collectAndStore(parentCtx, cancel, queued.ID, resultCh, &submitWG)
 	produced := <-producedCh
 
 	stats := produced.stats
@@ -61,13 +61,14 @@ func (m *Manager) runStreamingIngestion(parentCtx context.Context, cancel contex
 	return stats, nil
 }
 
-func (m *Manager) collectAndStore(ctx context.Context, cancel context.CancelFunc, jobID string, results <-chan worker.BatchResult) (ingestStats, error) {
+func (m *Manager) collectAndStore(ctx context.Context, cancel context.CancelFunc, jobID string, results <-chan worker.BatchResult, submitWG *sync.WaitGroup) (ingestStats, error) {
 	stats := ingestStats{}
 	pending := make([]model.VectorRecord, 0, m.storeBatchSize)
 	firstErr := error(nil)
 	completedBatches := 0
 
 	for result := range results {
+		submitWG.Done()
 		stats.EmbedDuration += result.Duration
 		if result.Err != nil && firstErr == nil {
 			firstErr = result.Err
