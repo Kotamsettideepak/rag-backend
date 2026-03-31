@@ -33,7 +33,7 @@ func (s *Service) StreamAnswer(
 		return "", err
 	}
 
-	p := prompt.Build(result.Modality, result.Context, BuildConversation(msgs), question)
+	p := prompt.Build(result.Modality, BuildPromptHistory(msgs, question), result.Context, question)
 	stream := make(chan string)
 	done := make(chan error, 1)
 	go func() {
@@ -44,6 +44,7 @@ func (s *Service) StreamAnswer(
 	if err != nil {
 		return "", err
 	}
+	logQuestionTrace(question, result.Context, p, answer)
 	if _, err := s.messages.Save(ctx, chatID, "assistant", answer); err != nil {
 		return "", err
 	}

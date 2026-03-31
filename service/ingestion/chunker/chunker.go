@@ -31,6 +31,7 @@ func New(targetSize, overlapSize int) *Chunker {
 func (c *Chunker) ChunkDocument(doc model.ParsedDocument) []model.Chunk {
 	var chunks []model.Chunk
 	index := 0
+	targetSize, overlapSize := c.profileForDocument(doc)
 
 	if (doc.FileKind == "audio" || doc.FileKind == "video") && len(doc.AudioChunks) > 0 {
 		chunks, index = c.chunkAudio(doc, index)
@@ -39,13 +40,14 @@ func (c *Chunker) ChunkDocument(doc model.ParsedDocument) []model.Chunk {
 		}
 	}
 
-	chunks, index = c.chunkPageTexts(doc, chunks, index)
+	chunks, index = c.chunkPageTexts(doc, chunks, index, targetSize, overlapSize)
 	if len(chunks) > 0 {
+		log.Printf("[chunker] file=%s kind=%s pages=%d profile_target=%d profile_overlap=%d chunks=%d", doc.FileName, doc.FileKind, len(doc.PageTexts), targetSize, overlapSize, len(chunks))
 		return chunks
 	}
 
-	chunks = c.chunkFlatText(doc, chunks, index)
-	log.Printf("[chunker] file=%s kind=%s pages=%d chunks=%d", doc.FileName, doc.FileKind, len(doc.PageTexts), len(chunks))
+	chunks = c.chunkFlatText(doc, chunks, index, targetSize, overlapSize)
+	log.Printf("[chunker] file=%s kind=%s pages=%d profile_target=%d profile_overlap=%d chunks=%d", doc.FileName, doc.FileKind, len(doc.PageTexts), targetSize, overlapSize, len(chunks))
 	return chunks
 }
 
@@ -85,9 +87,9 @@ func (c *Chunker) chunkAudio(doc model.ParsedDocument, index int) ([]model.Chunk
 	return chunks, index
 }
 
-func (c *Chunker) chunkPageTexts(doc model.ParsedDocument, chunks []model.Chunk, index int) ([]model.Chunk, int) {
+func (c *Chunker) chunkPageTexts(doc model.ParsedDocument, chunks []model.Chunk, index int, targetSize, overlapSize int) ([]model.Chunk, int) {
 	for pageIdx, pageText := range doc.PageTexts {
-		for _, text := range c.splitText(pageText) {
+		for _, text := range c.splitText(pageText, targetSize, overlapSize) {
 			text = strings.TrimSpace(text)
 			if text == "" {
 				continue
@@ -105,8 +107,8 @@ func (c *Chunker) chunkPageTexts(doc model.ParsedDocument, chunks []model.Chunk,
 	return chunks, index
 }
 
-func (c *Chunker) chunkFlatText(doc model.ParsedDocument, chunks []model.Chunk, index int) []model.Chunk {
-	for _, text := range c.splitText(doc.Text) {
+func (c *Chunker) chunkFlatText(doc model.ParsedDocument, chunks []model.Chunk, index int, targetSize, overlapSize int) []model.Chunk {
+	for _, text := range c.splitText(doc.Text, targetSize, overlapSize) {
 		text = strings.TrimSpace(text)
 		if text == "" {
 			continue
@@ -123,22 +125,23 @@ func (c *Chunker) chunkFlatText(doc model.ParsedDocument, chunks []model.Chunk, 
 	return chunks
 }
 
-func (c *Chunker) splitText(text string) []string {
+func (c *Chunker) splitText(text string, targetSize, overlapSize int) []string {
 	text = normalizeText(text)
 	if text == "" {
 		return nil
 	}
+	targetSize, overlapSize = sanitizeProfile(targetSize, overlapSize, c.TargetSize, c.OverlapSize)
 	runes := []rune(text)
-	if len(runes) <= c.TargetSize {
+	if len(runes) <= targetSize {
 		return []string{text}
 	}
-	step := c.TargetSize - c.OverlapSize
+	step := targetSize - overlapSize
 	if step <= 0 {
-		step = c.TargetSize
+		step = targetSize
 	}
 	var chunks []string
 	for start := 0; start < len(runes); start += step {
-		end := start + c.TargetSize
+		end := start + targetSize
 		if end > len(runes) {
 			end = len(runes)
 		}
@@ -162,6 +165,60 @@ func (c *Chunker) splitText(text string) []string {
 		}
 	}
 	return chunks
+}
+
+func (c *Chunker) profileForDocument(doc model.ParsedDocument) (int, int) {
+	targetSize := c.TargetSize
+	overlapSize := c.OverlapSize
+
+	// Dynamic PDF profile tuned for small/medium/large page ranges.
+	if strings.EqualFold(strings.TrimSpace(doc.FileKind), "pdf") {
+		pages := len(doc.PageTexts)
+		switch {
+		case pages > 0 && pages <= 20:
+			targetSize = 700
+			overlapSize = 100
+		case pages > 20 && pages <= 100:
+			targetSize = 1000
+			overlapSize = 150
+		case pages > 100:
+			targetSize = 1400
+			overlapSize = 200
+		default:
+			// Keep env-configured defaults when page information is unavailable.
+		}
+	}
+
+	return sanitizeProfile(targetSize, overlapSize, c.TargetSize, c.OverlapSize)
+}
+
+func sanitizeProfile(targetSize, overlapSize, fallbackTarget, fallbackOverlap int) (int, int) {
+	if targetSize <= 0 {
+		targetSize = fallbackTarget
+	}
+	if targetSize <= 0 {
+		targetSize = 1000
+	}
+	if overlapSize < 0 {
+		overlapSize = 0
+	}
+	if overlapSize >= targetSize {
+		overlapSize = targetSize / 5
+	}
+	if overlapSize <= 0 && fallbackOverlap > 0 && fallbackOverlap < targetSize {
+		overlapSize = fallbackOverlap
+	}
+	if overlapSize >= targetSize {
+		overlapSize = maxInt(1, targetSize/5)
+	}
+	return targetSize, overlapSize
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 func normalizeText(text string) string {

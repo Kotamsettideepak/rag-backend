@@ -31,11 +31,12 @@ func (s *Service) Answer(ctx context.Context, userID, chatID, question string) (
 		return "", err
 	}
 
-	p := prompt.Build(result.Modality, result.Context, BuildConversation(msgs), question)
+	p := prompt.Build(result.Modality, BuildPromptHistory(msgs, question), result.Context, question)
 	answer, err := groqClient().GenerateResponse([]groq.Message{{Role: "user", Content: p}})
 	if err != nil {
 		return "", err
 	}
+	logQuestionTrace(question, result.Context, p, answer)
 	if _, err := s.messages.Save(ctx, chatID, "assistant", answer); err != nil {
 		return "", err
 	}
@@ -82,4 +83,22 @@ func BuildConversation(messages []repository.Message) string {
 		}
 	}
 	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func BuildPromptHistory(messages []repository.Message, currentQuestion string) []prompt.HistoryMessage {
+	history := make([]prompt.HistoryMessage, 0, len(messages))
+	for index := len(messages) - 1; index >= 0; index-- {
+		content := strings.TrimSpace(messages[index].Content)
+		if content == "" {
+			continue
+		}
+		if len(history) == 0 && messages[index].Role == "user" && content == strings.TrimSpace(currentQuestion) {
+			continue
+		}
+		history = append(history, prompt.HistoryMessage{
+			Role:    messages[index].Role,
+			Content: content,
+		})
+	}
+	return history
 }

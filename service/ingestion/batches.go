@@ -6,6 +6,8 @@ import (
 	"gin-backend/model"
 )
 
+const maxPDFPages = 300
+
 func splitBatches(chunks []model.Chunk, size int) [][]model.Chunk {
 	if size <= 0 {
 		size = 1

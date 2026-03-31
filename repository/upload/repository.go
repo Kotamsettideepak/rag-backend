@@ -24,13 +24,21 @@ func Default() *Repository {
 }
 
 func (r *Repository) Create(ctx context.Context, chatID, fileURL, fileType, originalFileName string) (repository.UserUploadedData, error) {
+	return r.CreateForChat(ctx, chatID, fileURL, fileType, originalFileName)
+}
+
+func (r *Repository) CreateForChat(ctx context.Context, chatID, fileURL, fileType, originalFileName string) (repository.UserUploadedData, error) {
 	db, err := r.getDB()
 	if err != nil {
 		return repository.UserUploadedData{}, err
 	}
+	chatID = strings.TrimSpace(chatID)
+	if chatID == "" {
+		return repository.UserUploadedData{}, fmt.Errorf("chat_id is required")
+	}
 	record := repository.UserUploadedData{
 		ID:               uuid.NewString(),
-		ChatID:           chatID,
+		ChatID:           &chatID,
 		FileURL:          strings.TrimSpace(fileURL),
 		FileType:         strings.TrimSpace(fileType),
 		OriginalFileName: strings.TrimSpace(originalFileName),
@@ -42,6 +50,10 @@ func (r *Repository) Create(ctx context.Context, chatID, fileURL, fileType, orig
 }
 
 func (r *Repository) List(ctx context.Context, chatID string) ([]repository.UserUploadedData, error) {
+	return r.ListByChat(ctx, chatID)
+}
+
+func (r *Repository) ListByChat(ctx context.Context, chatID string) ([]repository.UserUploadedData, error) {
 	db, err := r.getDB()
 	if err != nil {
 		return nil, err

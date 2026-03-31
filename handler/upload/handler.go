@@ -67,7 +67,6 @@ func UploadHandler(c *gin.Context) {
 
 	c.JSON(http.StatusAccepted, jobPayload(job))
 }
-
 // StatusHandler handles GET /status/:job_id.
 func StatusHandler(c *gin.Context) {
 	jobID := c.Param("job_id")

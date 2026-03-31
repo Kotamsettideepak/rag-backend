@@ -18,7 +18,7 @@ const (
 	outputBitrateKbps = "64k"
 	outputSampleRate  = "16000"
 	outputChannels    = "1"
-	maxVideoDuration  = 3600.0
+	maxVideoDuration  = 1800.0
 	maxVideoUploadMB  = 150
 )
 
@@ -46,7 +46,7 @@ func (c *HTTPClient) Extract(ctx context.Context, staged model.StagedFile) (mode
 		return model.ParsedDocument{}, err
 	}
 	if duration > maxVideoDuration {
-		return model.ParsedDocument{}, fmt.Errorf("upload video less than 1 hour")
+		return model.ParsedDocument{}, fmt.Errorf("upload video less than 30 min")
 	}
 
 	audioPath, audioSize, err := convertVideoToAudio(ctx, staged)

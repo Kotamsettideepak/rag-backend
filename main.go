@@ -47,9 +47,6 @@ func main() {
 		}
 	}
 
-	if err := config.EnsureChromaRunning(); err != nil {
-		fatalf("[startup] chroma not reachable: %v", err)
-	}
 	if err := repository.InitDefault(context.Background()); err != nil {
 		fatalf("[startup] postgres init failed: %v", err)
 	}

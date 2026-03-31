@@ -92,7 +92,7 @@ func joinDocs(matches []model.SearchMatch) string {
 	parts := make([]string, 0, len(matches))
 	for _, match := range dedup(matches) {
 		if doc := strings.TrimSpace(match.Document); doc != "" {
-			parts = append(parts, doc)
+			parts = append(parts, withCitation(match, doc))
 		}
 	}
 	return joinParts(parts)
@@ -100,4 +100,25 @@ func joinDocs(matches []model.SearchMatch) string {
 
 func joinParts(parts []string) string {
 	return strings.TrimSpace(strings.Join(parts, "\n\n"))
+}
+
+func withCitation(match model.SearchMatch, doc string) string {
+	fileName := strings.TrimSpace(metaStr(match.Metadata, "file_name"))
+	if fileName == "" {
+		fileName = "document"
+	}
+	page := strings.TrimSpace(metaStr(match.Metadata, "page"))
+	if page == "" {
+		page = strings.TrimSpace(metaStr(match.Metadata, "page_from"))
+	}
+	section := strings.TrimSpace(metaStr(match.Metadata, "section_title"))
+	cite := "[" + fileName
+	if page != "" {
+		cite += " p." + page
+	}
+	if section != "" {
+		cite += " section: " + section
+	}
+	cite += "]"
+	return cite + " " + doc
 }

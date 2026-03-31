@@ -23,6 +23,7 @@ const (
 	KindVideo = "video"
 
 	maxVideoUploadBytes = 150 << 20
+	maxImageUploads     = 3
 )
 
 // Parser stages uploaded files to disk and optionally uploads to Cloudinary.
@@ -35,23 +36,36 @@ func New() *Parser {
 	return &Parser{cloudinary: cloudinary.NewClient()}
 }
 
-// StageFiles writes each multipart file to ./temp and returns StagedFile metadata.
-func (p *Parser) StageFiles(files []*multipart.FileHeader, chatID, userID string) ([]model.StagedFile, error) {
+// StageChatFiles writes chat-upload files to ./temp and returns StagedFile metadata.
+func (p *Parser) StageChatFiles(files []*multipart.FileHeader, chatID, userID string) ([]model.StagedFile, error) {
 	if err := os.MkdirAll("./temp", 0o755); err != nil {
 		return nil, err
 	}
 
 	staged := make([]model.StagedFile, 0, len(files))
 	pdfCount := 0
+	imageCount := 0
+	selectedKind := ""
 	for i, file := range files {
 		kind := detectKind(file.Filename, file.Header.Get("Content-Type"))
 		if !isSupportedKind(kind) {
 			return nil, fmt.Errorf("unsupported file type: %s", file.Filename)
 		}
+		if selectedKind == "" {
+			selectedKind = kind
+		} else if kind != selectedKind {
+			return nil, fmt.Errorf("only one file format can be uploaded at a time")
+		}
 		if kind == KindPDF {
 			pdfCount++
 			if pdfCount > 1 {
 				return nil, fmt.Errorf("only one PDF can be uploaded at a time")
+			}
+		}
+		if kind == KindImage {
+			imageCount++
+			if imageCount > maxImageUploads {
+				return nil, fmt.Errorf("upload up to %d images at a time", maxImageUploads)
 			}
 		}
 		if kind == KindVideo && file.Size > maxVideoUploadBytes {

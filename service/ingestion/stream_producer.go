@@ -11,8 +11,6 @@ import (
 	uploadrepo "gin-backend/repository/upload"
 )
 
-const maxPDFPages = 300
-
 func (m *Manager) produceChunks(ctx context.Context, queued queuedJob, chunkQueue chan<- model.Chunk) (ingestStats, error) {
 	stats := ingestStats{StartedAt: time.Now()}
 	queuedChunks := 0
@@ -35,7 +33,10 @@ func (m *Manager) produceChunks(ctx context.Context, queued queuedJob, chunkQueu
 
 		m.setJobStage(queued.ID, "chunking")
 		chunkStart := time.Now()
-		chunks := m.chunker.ChunkDocument(doc)
+		chunks := doc.Chunks
+		if len(chunks) == 0 {
+			chunks = m.chunker.ChunkDocument(doc)
+		}
 		stats.ChunkDuration += time.Since(chunkStart)
 		stats.TotalChunks += len(chunks)
 		log.Printf("[submit-phase] job=%s file=%s chunked_chunks=%d total_chunks=%d queue_cap=%d", queued.ID, file.OriginalName, len(chunks), stats.TotalChunks, cap(chunkQueue))
@@ -111,7 +112,7 @@ func (m *Manager) recordUpload(ctx context.Context, pg *uploadrepo.Repository, f
 		return nil
 	}
 
-	if _, err := pg.Create(ctx, file.ChatID, url, file.DetectedKind, file.OriginalName); err != nil {
+	if _, err := pg.CreateForChat(ctx, file.ChatID, url, file.DetectedKind, file.OriginalName); err != nil {
 		return err
 	}
 	return nil

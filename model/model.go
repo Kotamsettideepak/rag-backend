@@ -6,6 +6,7 @@ type SearchMatch struct {
 	ID       string
 	Document string
 	Metadata map[string]interface{}
+	Score    float64
 }
 
 type SearchContextResult struct {
@@ -35,6 +36,7 @@ type StagedFile struct {
 	OriginalOrder int    `json:"original_order"`
 	ChatID        string `json:"chat_id,omitempty"`
 	UserID        string `json:"user_id,omitempty"`
+	TopicID       string `json:"topic_id,omitempty"`
 }
 
 type FileResult struct {
@@ -87,9 +89,11 @@ type ParsedDocument struct {
 	FileKind    string
 	Text        string
 	PageTexts   []string
+	Chunks      []Chunk
 	AudioChunks []AudioTranscriptChunk
 	ChatID      string
 	UserID      string
+	TopicID     string
 }
 
 type Chunk struct {
@@ -99,6 +103,7 @@ type Chunk struct {
 	FileKind string
 	ChatID   string
 	UserID   string
+	TopicID  string
 	Page     int
 	Index    int
 	Text     string

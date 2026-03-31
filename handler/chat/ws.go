@@ -9,15 +9,17 @@ import (
 
 	"gin-backend/middleware"
 	chatservice "gin-backend/service/chat"
+	chatserviceprompt "gin-backend/service/chat/prompt"
 
 	"github.com/gin-gonic/gin"
 	"golang.org/x/net/websocket"
 )
 
 type wsRequest struct {
-	Type     string `json:"type"`
-	ChatID   string `json:"chat_id"`
-	Question string `json:"question"`
+	Type           string                            `json:"type"`
+	ChatID         string                            `json:"chat_id"`
+	Question       string                            `json:"question"`
+	RecentMessages []chatserviceprompt.HistoryMessage `json:"recent_messages"`
 }
 
 type wsResponse struct {

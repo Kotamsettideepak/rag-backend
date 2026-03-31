@@ -56,8 +56,8 @@ func NewManager(svc *embedding.Service) *Manager {
 		store:          vector.NewRepository(),
 		jobs:           make(map[string]*model.UploadJob),
 		jobSubs:        make(map[string]map[string]chan *model.UploadJob),
-		storeBatchSize: envInt("STORE_BATCH_SIZE", 64),
-		queryTopK:      envInt("QUERY_TOP_K", 10),
+		storeBatchSize: 64,
+		queryTopK:      envInt("QUERY_TOP_K", 80),
 		embedPolicy:    loadEmbedBatchPolicy(),
 	}
 
@@ -91,7 +91,7 @@ func (m *Manager) Shutdown() {
 
 // SubmitUpload stages files and enqueues an ingestion job.
 func (m *Manager) SubmitUpload(files []*multipart.FileHeader, chatID, userID string) (*model.UploadJob, error) {
-	staged, err := m.parser.StageFiles(files, chatID, userID)
+	staged, err := m.parser.StageChatFiles(files, chatID, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -194,10 +194,13 @@ func (m *Manager) SearchContext(ctx context.Context, question, chatID, userID st
 		return model.SearchContextResult{}, err
 	}
 
-	_, topK := resolveTopK(question, m.queryTopK)
-	matches, err := m.store.Search(embedding, topK, map[string]interface{}{"chat_id": chatID, "user_id": userID})
+	_, candidateK, finalK := resolveTopK(question, m.queryTopK)
+	matches, err := m.store.Search(embedding, candidateK, map[string]interface{}{"chat_id": chatID, "user_id": userID})
 	if err != nil {
 		return model.SearchContextResult{}, err
+	}
+	if finalK > 0 && len(matches) > finalK {
+		matches = matches[:finalK]
 	}
 
 	return retrievalsvc.BuildContextResult(question, matches, m.store), nil

@@ -60,15 +60,17 @@ func (s *Service) EmbedChunks(ctx context.Context, chunks []model.Chunk) ([]mode
 
 func buildChunkMetadata(chunk model.Chunk) map[string]interface{} {
 	metadata := map[string]interface{}{
-		"file_id":    chunk.FileID,
-		"file_name":  chunk.FileName,
-		"file_kind":  chunk.FileKind,
-		"chat_id":    chunk.ChatID,
-		"user_id":    chunk.UserID,
-		"page":       chunk.Page,
-		"chunk_idx":  chunk.Index,
-		"chunk_hash": chunk.Hash,
-		"source":     "upload",
+		"file_id":     chunk.FileID,
+		"file_name":   chunk.FileName,
+		"file_kind":   chunk.FileKind,
+		"chat_id":     chunk.ChatID,
+		"user_id":     chunk.UserID,
+		"page":        chunk.Page,
+		"chunk_idx":   chunk.Index,
+		"chunk_index": chunk.Index,
+		"chunk_hash":  chunk.Hash,
+		"hash":        chunk.Hash,
+		"source":      "upload",
 	}
 
 	for key, value := range chunk.Metadata {

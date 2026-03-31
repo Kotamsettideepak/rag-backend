@@ -7,6 +7,7 @@ import (
 
 	"gin-backend/middleware"
 	chatservice "gin-backend/service/chat"
+	chatserviceprompt "gin-backend/service/chat/prompt"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,8 +15,9 @@ import (
 // ChatHandler handles the POST /chat endpoint (non-streaming).
 func ChatHandler(c *gin.Context) {
 	var req struct {
-		ChatID  string `json:"chat_id"`
-		Message string `json:"message"`
+		ChatID         string                            `json:"chat_id"`
+		Message        string                            `json:"message"`
+		RecentMessages []chatserviceprompt.HistoryMessage `json:"recent_messages"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})

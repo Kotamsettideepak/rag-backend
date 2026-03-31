@@ -27,12 +27,12 @@ type Message struct {
 
 type UserUploadedData struct {
 	ID               string    `gorm:"type:uuid;primaryKey" json:"id"`
-	ChatID           string    `gorm:"type:uuid;not null;index:idx_uploaded_data_chat_created,priority:1" json:"chat_id"`
+	ChatID           *string   `gorm:"type:uuid;index:idx_uploaded_data_chat_created,priority:1;index" json:"chat_id,omitempty"`
 	FileURL          string    `gorm:"type:text;not null" json:"file_url"`
 	FileType         string    `gorm:"type:text;not null" json:"file_type"`
 	OriginalFileName string    `gorm:"type:text" json:"original_file_name"`
 	CreatedAt        time.Time `gorm:"index:idx_uploaded_data_chat_created,priority:2" json:"created_at"`
-	Chat             Chat      `gorm:"foreignKey:ChatID;constraint:OnDelete:CASCADE" json:"-"`
+	Chat             *Chat     `gorm:"foreignKey:ChatID;constraint:OnDelete:CASCADE" json:"-"`
 }
 
 func (UserUploadedData) TableName() string {

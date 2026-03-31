@@ -52,7 +52,7 @@ func VoiceChatHandler(c *gin.Context) {
 		log.Printf("[voice] request failed: %v", err)
 		switch {
 		case errors.Is(err, chatservice.ErrEmptyTranscript):
-			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Try asking a question."})
 		case strings.Contains(strings.ToLower(err.Error()), "not found"):
 			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		default:
