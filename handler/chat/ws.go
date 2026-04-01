@@ -16,9 +16,10 @@ import (
 )
 
 type wsRequest struct {
-	Type           string                            `json:"type"`
-	ChatID         string                            `json:"chat_id"`
-	Question       string                            `json:"question"`
+	Type           string                             `json:"type"`
+	ChatID         string                             `json:"chat_id"`
+	TopicID        string                             `json:"topic_id"`
+	Question       string                             `json:"question"`
 	RecentMessages []chatserviceprompt.HistoryMessage `json:"recent_messages"`
 }
 
@@ -45,13 +46,14 @@ func WebSocketHandler(c *gin.Context) {
 			}
 
 			chatID := strings.TrimSpace(req.ChatID)
+			topicID := strings.TrimSpace(req.TopicID)
 			question := strings.TrimSpace(req.Question)
-			if chatID == "" || question == "" {
-				_ = websocket.JSON.Send(conn, wsResponse{Type: "error", Message: "chat_id and question are required"})
+			if question == "" || (chatID == "" && topicID == "") {
+				_ = websocket.JSON.Send(conn, wsResponse{Type: "error", Message: "question and one of chat_id or topic_id are required"})
 				continue
 			}
 
-			if err := streamAnswer(conn, chatID, question); err != nil {
+			if err := streamAnswer(conn, chatID, topicID, question, req.RecentMessages); err != nil {
 				log.Printf("[ws] stream error: %v", err)
 				_ = websocket.JSON.Send(conn, wsResponse{Type: "error", Message: err.Error()})
 			}
@@ -59,18 +61,26 @@ func WebSocketHandler(c *gin.Context) {
 	}).ServeHTTP(c.Writer, c.Request)
 }
 
-func streamAnswer(conn *websocket.Conn, chatID, question string) error {
+func streamAnswer(conn *websocket.Conn, chatID, topicID, question string, history []chatserviceprompt.HistoryMessage) error {
 	user, err := middleware.ResolveUserFromRequest(conn.Request())
 	if err != nil {
 		return fmt.Errorf("auth failed: %w", err)
 	}
+	_ = user
 
 	if err := websocket.JSON.Send(conn, wsResponse{Type: "start"}); err != nil {
 		return err
 	}
-	answer, err := chatservice.Default().StreamAnswer(context.Background(), user.ID, chatID, question, func(chunk string) error {
-		return websocket.JSON.Send(conn, wsResponse{Type: "chunk", Content: chunk})
-	})
+	var answer string
+	if topicID != "" {
+		answer, err = chatservice.Default().StreamTopicAnswer(context.Background(), topicID, question, history, func(chunk string) error {
+			return websocket.JSON.Send(conn, wsResponse{Type: "chunk", Content: chunk})
+		})
+	} else {
+		answer, err = chatservice.Default().StreamAnswer(context.Background(), user.ID, chatID, question, func(chunk string) error {
+			return websocket.JSON.Send(conn, wsResponse{Type: "chunk", Content: chunk})
+		})
+	}
 	if err != nil {
 		return fmt.Errorf("failed to generate response: %w", err)
 	}

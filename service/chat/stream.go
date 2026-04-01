@@ -50,3 +50,36 @@ func (s *Service) StreamAnswer(
 	}
 	return answer, nil
 }
+
+func (s *Service) StreamTopicAnswer(
+	ctx context.Context,
+	topicID, question string,
+	history []prompt.HistoryMessage,
+	onChunk func(string) error,
+) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	if _, err := s.topics.Get(ctx, topicID); err != nil {
+		return "", err
+	}
+
+	result, err := ingestion.DefaultManager().SearchTopicContext(ctx, question, topicID)
+	if err != nil {
+		return "", err
+	}
+
+	p := prompt.Build(result.Modality, history, result.Context, question)
+	stream := make(chan string)
+	done := make(chan error, 1)
+	go func() {
+		done <- groqClient().StreamResponse([]groq.Message{{Role: "user", Content: p}}, stream)
+	}()
+
+	answer, err := collectStream(ctx, stream, done, onChunk)
+	if err != nil {
+		return "", err
+	}
+	logQuestionTrace(question, result.Context, p, answer)
+	return answer, nil
+}

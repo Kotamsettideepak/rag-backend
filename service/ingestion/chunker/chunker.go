@@ -63,7 +63,7 @@ func (c *Chunker) chunkAudio(doc model.ParsedDocument, index int) ([]model.Chunk
 			chunks = append(chunks, model.Chunk{
 				ID:     doc.FileID + "-" + shortHash(h[:]) + "-" + itoa(index),
 				FileID: doc.FileID, FileName: doc.FileName, FileKind: doc.FileKind,
-				ChatID: doc.ChatID, UserID: doc.UserID, Page: 1, Index: index,
+				ChatID: doc.ChatID, UserID: doc.UserID, TopicID: doc.TopicID, Page: 1, Index: index,
 				Text: meta, Hash: hex.EncodeToString(h[:]),
 			})
 			index++
@@ -78,7 +78,7 @@ func (c *Chunker) chunkAudio(doc model.ParsedDocument, index int) ([]model.Chunk
 		chunks = append(chunks, model.Chunk{
 			ID:     doc.FileID + "-" + shortHash(h[:]) + "-" + itoa(index),
 			FileID: doc.FileID, FileName: doc.FileName, FileKind: doc.FileKind,
-			ChatID: doc.ChatID, UserID: doc.UserID, Page: index + 2, Index: index,
+			ChatID: doc.ChatID, UserID: doc.UserID, TopicID: doc.TopicID, Page: index + 2, Index: index,
 			Text: text, Hash: hex.EncodeToString(h[:]),
 			Metadata: map[string]interface{}{"content_type": transcriptType, "segment_start": ac.Start, "segment_end": ac.End},
 		})
@@ -98,7 +98,7 @@ func (c *Chunker) chunkPageTexts(doc model.ParsedDocument, chunks []model.Chunk,
 			chunks = append(chunks, model.Chunk{
 				ID:     doc.FileID + "-" + shortHash(h[:]) + "-" + itoa(index),
 				FileID: doc.FileID, FileName: doc.FileName, FileKind: doc.FileKind,
-				ChatID: doc.ChatID, UserID: doc.UserID, Page: pageIdx + 1, Index: index,
+				ChatID: doc.ChatID, UserID: doc.UserID, TopicID: doc.TopicID, Page: pageIdx + 1, Index: index,
 				Text: text, Hash: hex.EncodeToString(h[:]),
 			})
 			index++
@@ -117,7 +117,7 @@ func (c *Chunker) chunkFlatText(doc model.ParsedDocument, chunks []model.Chunk, 
 		chunks = append(chunks, model.Chunk{
 			ID:     doc.FileID + "-" + shortHash(h[:]) + "-" + itoa(index),
 			FileID: doc.FileID, FileName: doc.FileName, FileKind: doc.FileKind,
-			ChatID: doc.ChatID, UserID: doc.UserID, Page: 1, Index: index,
+			ChatID: doc.ChatID, UserID: doc.UserID, TopicID: doc.TopicID, Page: 1, Index: index,
 			Text: text, Hash: hex.EncodeToString(h[:]),
 		})
 		index++

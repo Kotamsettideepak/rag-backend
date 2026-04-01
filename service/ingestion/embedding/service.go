@@ -65,12 +65,16 @@ func buildChunkMetadata(chunk model.Chunk) map[string]interface{} {
 		"file_kind":   chunk.FileKind,
 		"chat_id":     chunk.ChatID,
 		"user_id":     chunk.UserID,
+		"topic_id":    chunk.TopicID,
 		"page":        chunk.Page,
 		"chunk_idx":   chunk.Index,
 		"chunk_index": chunk.Index,
 		"chunk_hash":  chunk.Hash,
 		"hash":        chunk.Hash,
 		"source":      "upload",
+	}
+	if strings.TrimSpace(chunk.TopicID) != "" && strings.TrimSpace(chunk.ChatID) == "" {
+		metadata["source"] = "topic"
 	}
 
 	for key, value := range chunk.Metadata {

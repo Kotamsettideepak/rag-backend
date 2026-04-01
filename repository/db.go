@@ -77,7 +77,7 @@ func (s *Store) AutoMigrate(ctx context.Context) error {
 	if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS vector`).Error; err != nil {
 		return err
 	}
-	if err := db.AutoMigrate(&User{}, &Chat{}, &Message{}, &UserUploadedData{}); err != nil {
+	if err := db.AutoMigrate(&User{}, &Chat{}, &Message{}, &UserUploadedData{}, &Topic{}, &TopicChunkFailure{}); err != nil {
 		return err
 	}
 	if err := db.Exec(`
@@ -85,6 +85,7 @@ func (s *Store) AutoMigrate(ctx context.Context) error {
 			id text PRIMARY KEY,
 			chat_id uuid NULL,
 			user_id uuid NULL,
+			topic_id uuid NULL,
 			file_id text NOT NULL,
 			file_name text NOT NULL,
 			file_kind text NOT NULL,
@@ -107,6 +108,7 @@ func (s *Store) AutoMigrate(ctx context.Context) error {
 		return err
 	}
 	alterStmts := []string{
+		`ALTER TABLE context_vectors ADD COLUMN IF NOT EXISTS topic_id uuid NULL`,
 		`ALTER TABLE context_vectors ADD COLUMN IF NOT EXISTS chunk_type text NOT NULL DEFAULT 'text'`,
 		`ALTER TABLE context_vectors ADD COLUMN IF NOT EXISTS section_title text NULL`,
 		`ALTER TABLE context_vectors ADD COLUMN IF NOT EXISTS code_language text NULL`,
@@ -122,11 +124,13 @@ func (s *Store) AutoMigrate(ctx context.Context) error {
 	}
 	indexes := []string{
 		`CREATE INDEX IF NOT EXISTS idx_context_vectors_chat_user ON context_vectors (chat_id, user_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_context_vectors_topic_id ON context_vectors (topic_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_context_vectors_file_id ON context_vectors (file_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_context_vectors_chat_user_chunk_type ON context_vectors (chat_id, user_id, chunk_type)`,
 		`CREATE INDEX IF NOT EXISTS idx_context_vectors_metadata ON context_vectors USING gin (metadata)`,
 		`CREATE INDEX IF NOT EXISTS idx_context_vectors_embedding_hnsw ON context_vectors USING hnsw (embedding vector_cosine_ops)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS uq_context_vectors_chat_file_hash ON context_vectors (chat_id, user_id, file_id, hash) WHERE chat_id IS NOT NULL AND user_id IS NOT NULL AND hash <> ''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS uq_context_vectors_topic_file_hash ON context_vectors (topic_id, file_id, hash) WHERE topic_id IS NOT NULL AND hash <> ''`,
 	}
 	for _, stmt := range indexes {
 		if err := db.Exec(stmt).Error; err != nil {

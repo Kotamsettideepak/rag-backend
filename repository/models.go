@@ -38,3 +38,31 @@ type UserUploadedData struct {
 func (UserUploadedData) TableName() string {
 	return "user_uploaded_data"
 }
+
+type Topic struct {
+	ID        string    `gorm:"type:uuid;primaryKey" json:"id"`
+	Name      string    `gorm:"type:text;not null;uniqueIndex" json:"name"`
+	Status    string    `gorm:"type:text;not null;default:'No Context'" json:"status"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (Topic) TableName() string {
+	return "topics"
+}
+
+type TopicChunkFailure struct {
+	ID         string    `gorm:"type:uuid;primaryKey" json:"id"`
+	TopicID    string    `gorm:"type:uuid;not null;index" json:"topic_id"`
+	JobID      string    `gorm:"type:text;index" json:"job_id"`
+	FileID     string    `gorm:"type:text;not null" json:"file_id"`
+	ChunkIndex int       `gorm:"not null;default:0" json:"chunk_index"`
+	Reason     string    `gorm:"type:text;not null" json:"reason"`
+	Attempts   int       `gorm:"not null;default:0" json:"attempts"`
+	Payload    string    `gorm:"type:jsonb;not null;default:'{}'" json:"payload"`
+	CreatedAt  time.Time `json:"created_at"`
+}
+
+func (TopicChunkFailure) TableName() string {
+	return "topic_chunk_failures"
+}

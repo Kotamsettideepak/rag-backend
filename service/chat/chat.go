@@ -47,6 +47,32 @@ func (s *Service) Create(ctx context.Context, userID, title string) (repository.
 	return s.chats.Create(ctx, userID, title)
 }
 
+func (s *Service) ListTopics(ctx context.Context, limit int) ([]repository.Topic, error) {
+	return s.topics.List(ctx, limit)
+}
+
+func (s *Service) AnswerTopic(ctx context.Context, topicID, question string, history []prompt.HistoryMessage) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	defer cancel()
+
+	if _, err := s.topics.Get(ctx, topicID); err != nil {
+		return "", err
+	}
+
+	result, err := ingestion.DefaultManager().SearchTopicContext(ctx, question, topicID)
+	if err != nil {
+		return "", err
+	}
+
+	p := prompt.Build(result.Modality, history, result.Context, question)
+	answer, err := groqClient().GenerateResponse([]groq.Message{{Role: "user", Content: p}})
+	if err != nil {
+		return "", err
+	}
+	logQuestionTrace(question, result.Context, p, answer)
+	return answer, nil
+}
+
 func (s *Service) List(ctx context.Context, userID string, limit int) ([]repository.Chat, error) {
 	return s.chats.List(ctx, userID, limit)
 }

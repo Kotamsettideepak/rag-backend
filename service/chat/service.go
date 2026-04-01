@@ -5,6 +5,7 @@ import (
 	"gin-backend/client/groq"
 	"gin-backend/repository/chat"
 	"gin-backend/repository/message"
+	topicrepo "gin-backend/repository/topic"
 	"gin-backend/repository/upload"
 )
 
@@ -12,6 +13,7 @@ type Service struct {
 	chats    *chat.Repository
 	messages *message.Repository
 	uploads  *upload.Repository
+	topics   *topicrepo.Repository
 }
 
 type VoiceResult struct {
@@ -23,6 +25,7 @@ func NewService() *Service {
 		chats:    chat.Default(),
 		messages: message.Default(),
 		uploads:  upload.Default(),
+		topics:   topicrepo.Default(),
 	}
 }
 

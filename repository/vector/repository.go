@@ -39,15 +39,16 @@ func (r *Repository) AddRecords(records []model.VectorRecord) error {
 
 			if err := tx.Exec(`
 				INSERT INTO context_vectors (
-					id, chat_id, user_id, file_id, file_name, file_kind,
+					id, chat_id, user_id, topic_id, file_id, file_name, file_kind,
 					chunk_type, section_title, code_language, page_from, page_to, has_formula, picture_class,
 					page, chunk_index, hash, document, metadata, embedding
-				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::vector)
+				) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::vector)
 				ON CONFLICT DO NOTHING
 			`,
 				record.ID,
 				stringMeta(record.Metadata, "chat_id"),
 				stringMeta(record.Metadata, "user_id"),
+				stringMeta(record.Metadata, "topic_id"),
 				stringMeta(record.Metadata, "file_id"),
 				stringMeta(record.Metadata, "file_name"),
 				stringMeta(record.Metadata, "file_kind"),
@@ -173,7 +174,7 @@ func buildWhereClause(where map[string]interface{}) (string, []interface{}) {
 	args := make([]interface{}, 0, len(where))
 	for key, value := range where {
 		switch key {
-		case "chat_id", "user_id", "file_id", "file_name", "file_kind", "hash":
+		case "chat_id", "user_id", "topic_id", "file_id", "file_name", "file_kind", "hash":
 			clauses = append(clauses, fmt.Sprintf("%s = ?", key))
 			args = append(args, fmt.Sprintf("%v", value))
 		case "page", "chunk_index":

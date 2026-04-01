@@ -15,8 +15,9 @@ import (
 // ChatHandler handles the POST /chat endpoint (non-streaming).
 func ChatHandler(c *gin.Context) {
 	var req struct {
-		ChatID         string                            `json:"chat_id"`
-		Message        string                            `json:"message"`
+		ChatID         string                             `json:"chat_id"`
+		TopicID        string                             `json:"topic_id"`
+		Message        string                             `json:"message"`
 		RecentMessages []chatserviceprompt.HistoryMessage `json:"recent_messages"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -24,9 +25,10 @@ func ChatHandler(c *gin.Context) {
 		return
 	}
 	req.ChatID = strings.TrimSpace(req.ChatID)
+	req.TopicID = strings.TrimSpace(req.TopicID)
 	req.Message = strings.TrimSpace(req.Message)
-	if req.ChatID == "" || req.Message == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "chat_id and message are required"})
+	if req.Message == "" || (req.ChatID == "" && req.TopicID == "") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "message and one of chat_id or topic_id are required"})
 		return
 	}
 
@@ -36,7 +38,12 @@ func ChatHandler(c *gin.Context) {
 		return
 	}
 
-	answer, err := chatservice.Default().Answer(c.Request.Context(), user.ID, req.ChatID, req.Message)
+	var answer string
+	if req.TopicID != "" {
+		answer, err = chatservice.Default().AnswerTopic(c.Request.Context(), req.TopicID, req.Message, req.RecentMessages)
+	} else {
+		answer, err = chatservice.Default().Answer(c.Request.Context(), user.ID, req.ChatID, req.Message)
+	}
 	if err != nil {
 		log.Printf("[chat] answer failed: %v", err)
 		status := http.StatusInternalServerError
@@ -48,6 +55,23 @@ func ChatHandler(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"answer": answer})
+}
+
+func ListTopicsHandler(c *gin.Context) {
+	user, err := middleware.ResolveUser(c)
+	if err != nil {
+		middleware.RespondAuthError(c, err)
+		return
+	}
+	_ = user
+
+	topics, err := chatservice.Default().ListTopics(c.Request.Context(), 200)
+	if err != nil {
+		log.Printf("[topic] list failed err=%v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load topics"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"topics": topics})
 }
 
 // CreateChatHandler handles POST /chat/create.

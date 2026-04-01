@@ -18,6 +18,7 @@ import (
 	"gin-backend/routes"
 	"gin-backend/service/ingestion"
 	"gin-backend/service/ingestion/embedding"
+	"gin-backend/service/topicingest"
 
 	"github.com/gin-gonic/gin"
 )
@@ -56,9 +57,13 @@ func main() {
 	if len(apiKeys) == 0 {
 		fatalf("[startup] at least one JINA_API_KEY is required")
 	}
-	mgr := ingestion.NewManager(embedding.NewService(embedding.NewJinaRepository(apiKeys)))
+	embedSvc := embedding.NewService(embedding.NewJinaRepository(apiKeys))
+	mgr := ingestion.NewManager(embedSvc)
 	ingestion.SetDefaultManager(mgr)
+	topicSvc := topicingest.NewService(embedSvc)
+	topicingest.SetDefault(topicSvc)
 	defer mgr.Shutdown()
+	defer topicSvc.Shutdown()
 
 	router := gin.New()
 	if gin.Mode() != gin.ReleaseMode {

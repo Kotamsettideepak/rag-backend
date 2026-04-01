@@ -206,6 +206,24 @@ func (m *Manager) SearchContext(ctx context.Context, question, chatID, userID st
 	return retrievalsvc.BuildContextResult(question, matches, m.store), nil
 }
 
+func (m *Manager) SearchTopicContext(ctx context.Context, question, topicID string) (model.SearchContextResult, error) {
+	embedding, err := m.embedder.EmbedQuery(ctx, question)
+	if err != nil {
+		return model.SearchContextResult{}, err
+	}
+
+	_, candidateK, finalK := resolveTopK(question, m.queryTopK)
+	matches, err := m.store.Search(embedding, candidateK, map[string]interface{}{"topic_id": topicID})
+	if err != nil {
+		return model.SearchContextResult{}, err
+	}
+	if finalK > 0 && len(matches) > finalK {
+		matches = matches[:finalK]
+	}
+
+	return retrievalsvc.BuildContextResult(question, matches, m.store), nil
+}
+
 func (m *Manager) VectorStore() *vector.Repository {
 	return m.store
 }
