@@ -229,6 +229,27 @@ func (m *Manager) SearchTopicContext(ctx context.Context, question, topicID stri
 	return retrievalsvc.BuildContextResult(question, matches, m.store), nil
 }
 
+func (m *Manager) SearchTopicMatches(ctx context.Context, question, topicID string, limit int) ([]model.SearchMatch, error) {
+	embedding, err := m.embedder.EmbedQuery(ctx, question)
+	if err != nil {
+		return nil, err
+	}
+
+	_, candidateK, _ := resolveTopicTopK(question, m.queryTopK)
+	if limit > 0 && limit > candidateK {
+		candidateK = limit
+	}
+	matches, err := m.store.Search(embedding, candidateK, map[string]interface{}{"topic_id": topicID})
+	if err != nil {
+		return nil, err
+	}
+	matches = m.rerankMatches(ctx, question, matches)
+	if limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
+	}
+	return matches, nil
+}
+
 func (m *Manager) VectorStore() *vector.Repository {
 	return m.store
 }

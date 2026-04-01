@@ -77,7 +77,20 @@ func (s *Store) AutoMigrate(ctx context.Context) error {
 	if err := db.Exec(`CREATE EXTENSION IF NOT EXISTS vector`).Error; err != nil {
 		return err
 	}
-	if err := db.AutoMigrate(&User{}, &Chat{}, &Message{}, &UserUploadedData{}, &Topic{}, &TopicChunkFailure{}); err != nil {
+	if err := db.AutoMigrate(
+		&User{},
+		&Chat{},
+		&Message{},
+		&UserUploadedData{},
+		&Topic{},
+		&TopicChunkFailure{},
+		&QuizSession{},
+		&QuizTopicItem{},
+		&QuizQuestion{},
+		&QuizAnswer{},
+		&QuizEvaluation{},
+		&QuizReport{},
+	); err != nil {
 		return err
 	}
 	if err := db.Exec(`

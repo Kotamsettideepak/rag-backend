@@ -18,6 +18,7 @@ import (
 	"gin-backend/routes"
 	"gin-backend/service/ingestion"
 	"gin-backend/service/ingestion/embedding"
+	"gin-backend/service/quiz"
 	"gin-backend/service/rerank"
 	"gin-backend/service/topicingest"
 
@@ -43,6 +44,7 @@ func main() {
 		{"gemini", config.ValidateGeminiConfig},
 		{"cloudinary", config.ValidateCloudinaryConfig},
 		{"extractor", config.ValidateExtractorConfig},
+		{"quiz-services", config.ValidateQuizServicesConfig},
 	} {
 		if err := check.fn(); err != nil {
 			fatalf("[startup] invalid %s config: %v", check.name, err)
@@ -63,8 +65,11 @@ func main() {
 	ingestion.SetDefaultManager(mgr)
 	topicSvc := topicingest.NewService(embedSvc)
 	topicingest.SetDefault(topicSvc)
+	quizSvc := quiz.NewService()
+	quiz.SetDefault(quizSvc)
 	defer mgr.Shutdown()
 	defer topicSvc.Shutdown()
+	defer quizSvc.Shutdown()
 
 	router := gin.New()
 	if gin.Mode() != gin.ReleaseMode {

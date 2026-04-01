@@ -2,6 +2,7 @@ package routes
 
 import (
 	"gin-backend/handler/chat"
+	"gin-backend/handler/quiz"
 	"gin-backend/handler/topic"
 	"gin-backend/handler/upload"
 	"gin-backend/handler/voice"
@@ -34,6 +35,13 @@ func Register(r *gin.Engine) {
 	r.DELETE("/chat/:chat_id", chat.DeleteChatHandler)
 	r.POST("/chat", chat.ChatHandler)
 	r.DELETE("/context", chat.ClearContextHandler)
+	r.POST("/topic/:topic_id/quiz/start", quiz.StartTopicQuizHandler)
+	r.GET("/topic/:topic_id/quizzes", quiz.TopicQuizHistoryHandler)
+	r.GET("/topic/quiz/:quiz_id", quiz.TopicQuizDetailHandler)
+	r.POST("/topic/quiz/:quiz_id/questions/:question_id/answer", quiz.TopicQuizAnswerHandler)
+	r.POST("/topic/quiz/:quiz_id/complete", quiz.CompleteTopicQuizHandler)
+	r.GET("/ws/topic-quiz/:quiz_id", quiz.TopicQuizWSHandler)
+	r.POST("/internal/quiz/jobs/questions", quiz.InternalQuizQuestionsHandler)
 
 	// Chat (WebSocket streaming)
 	r.GET("/ws", chat.WebSocketHandler)
