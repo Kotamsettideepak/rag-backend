@@ -18,6 +18,7 @@ import (
 	"gin-backend/routes"
 	"gin-backend/service/ingestion"
 	"gin-backend/service/ingestion/embedding"
+	"gin-backend/service/rerank"
 	"gin-backend/service/topicingest"
 
 	"github.com/gin-gonic/gin"
@@ -58,7 +59,7 @@ func main() {
 		fatalf("[startup] at least one JINA_API_KEY is required")
 	}
 	embedSvc := embedding.NewService(embedding.NewJinaRepository(apiKeys))
-	mgr := ingestion.NewManager(embedSvc)
+	mgr := ingestion.NewManager(embedSvc, rerank.NewService(apiKeys))
 	ingestion.SetDefaultManager(mgr)
 	topicSvc := topicingest.NewService(embedSvc)
 	topicingest.SetDefault(topicSvc)

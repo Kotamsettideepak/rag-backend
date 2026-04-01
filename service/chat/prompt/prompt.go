@@ -45,6 +45,48 @@ func Build(modality string, previousMessages []HistoryMessage, contextText, ques
 	return strings.TrimSpace(strings.Join(sections, "\n\n"))
 }
 
+func BuildTopic(topicName, modality string, previousMessages []HistoryMessage, contextText, question string) string {
+	previousMessagesText := clamp(formatPreviousMessages(previousMessages), MaxConversationChars)
+	contextText = clamp(contextText, MaxContextChars)
+	question = clamp(question, MaxQuestionChars)
+	topicName = strings.TrimSpace(topicName)
+
+	allInstructions := append(topicBaseInstructions(), modalityInstructions(modality)...)
+	allInstructions = append(allInstructions, topicQuestionInstructions(question)...)
+	allInstructions = append(allInstructions, topicHistoryInstructions()...)
+
+	sections := []string{
+		"You are answering questions about a selected topic using retrieved topic context and the recent conversation when helpful.",
+		fmt.Sprintf("Selected topic: %s", topicName),
+		fmt.Sprintf("Context modality: %s", normalize(modality)),
+		fmt.Sprintf("Previous conversation messages:\n%s", previousMessagesText),
+		fmt.Sprintf("Current question:\n%s", strings.TrimSpace(question)),
+		fmt.Sprintf("Retrieved context for this topic:\n%s", strings.TrimSpace(contextText)),
+		"Instructions:\n" + strings.Join(allInstructions, "\n"),
+	}
+
+	return strings.TrimSpace(strings.Join(sections, "\n\n"))
+}
+
+func BuildRetrievalRewrite(previousMessages []HistoryMessage, question, topicName string) string {
+	question = clamp(question, MaxQuestionChars)
+	previousMessagesText := clamp(formatPreviousMessages(previousMessages), MaxConversationChars)
+	topicName = strings.TrimSpace(topicName)
+
+	sections := []string{
+		"You rewrite follow-up questions into standalone retrieval queries.",
+	}
+	if topicName != "" {
+		sections = append(sections, fmt.Sprintf("Selected topic:\n%s", topicName))
+	}
+	sections = append(sections,
+		fmt.Sprintf("Previous conversation:\n%s", previousMessagesText),
+		fmt.Sprintf("Current user question:\n%s", question),
+		"Instructions:\n- Rewrite the current user question into one clear standalone retrieval query.\n- Use previous conversation only to resolve references like it, this, that, they, first one, second one, compare them, explain more, why, or how.\n- Preserve the user's intent.\n- Keep the query concise and retrieval-friendly.\n- Do not answer the question.\n- Do not include explanations, bullet points, or formatting.\n- Output only the rewritten standalone query.",
+	)
+	return strings.TrimSpace(strings.Join(sections, "\n\n"))
+}
+
 func baseInstructions() []string {
 	return []string{
 		"- Prefer this evidence order: retrieved context, then recent conversation, then minimal general knowledge only when needed for clarity.",
@@ -62,6 +104,29 @@ func baseInstructions() []string {
 	}
 }
 
+func topicBaseInstructions() []string {
+	return []string{
+		"- Treat the selected topic as the main subject area for the answer.",
+		"- Use the retrieved topic context as the main factual source and use recent conversation only when the question is a follow-up.",
+		"- Give the answer directly in clear, natural language.",
+		"- Make the answer correct, precise, and easy for a normal user to understand.",
+		"- If the user asks a follow-up, use the previous conversation messages to resolve what the user means before answering.",
+		"- If the retrieved information is incomplete, give the best supported answer and say briefly what is still uncertain.",
+		"- Answer only if the question is actually about the selected topic or clearly supported by the retrieved topic context.",
+		"- If the user asks about something outside the selected topic, say briefly that the question is outside this topic and ask them to ask a question related to the selected topic.",
+		"- Do not answer unrelated questions using general knowledge just because you know the answer.",
+		"- Avoid fabricating exact claims, citations, page numbers, dates, or code output.",
+		"- Write in a user-friendly way and avoid unnecessary filler.",
+		"- Prefer clarity and correctness over unnecessary brevity.",
+		"- Never say phrases like 'according to the retrieved context', 'based on the retrieved context', 'based on the provided document', or 'from the topic context'.",
+		"- Do not mention context, retrieval, prompt, document analysis, or source-processing unless the user explicitly asks how you know.",
+		"- Do not begin by repeating or rephrasing the user's question.",
+		"- Answer as a helpful teacher or assistant, not as a retrieval system.",
+		"- Do not narrate your reasoning process before answering.",
+		"- Do not force citations or document references unless the user explicitly asks for them.",
+	}
+}
+
 func historyInstructions() []string {
 	return []string{
 		"- The previous conversation messages are reference context only.",
@@ -71,6 +136,15 @@ func historyInstructions() []string {
 		"- If the current question refers to a previous example, code snippet, explanation, or answer, use the previous conversation messages to resolve the reference before answering.",
 		"- If previous conversation messages and current retrieved context disagree, prefer the current retrieved context.",
 		"- If neither the previous conversation messages nor the current retrieved context clearly support the answer, say the answer is not available.",
+	}
+}
+
+func topicHistoryInstructions() []string {
+	return []string{
+		"- Use previous conversation messages when the current question depends on them, especially follow-ups such as this, that, above, previous, second one, why, compare them, or explain more.",
+		"- If the current question is standalone, answer mainly from the retrieved topic context.",
+		"- If previous conversation messages and current retrieved topic context disagree, prefer the current retrieved topic context.",
+		"- If the answer is not fully covered by the retrieved context, you may use minimal topic-relevant background knowledge for coherence, but make sure the final answer stays aligned with the retrieved context.",
 	}
 }
 
@@ -135,6 +209,37 @@ func questionInstructions(modality, question string) []string {
 			)
 		}
 		return out
+	}
+
+	return intentRules
+}
+
+func topicQuestionInstructions(question string) []string {
+	q := strings.ToLower(strings.TrimSpace(question))
+	if q == "" {
+		return nil
+	}
+
+	intentRules := learningIntentInstructions(q)
+	if asksForSummary(q) {
+		return append(intentRules, []string{
+			"- Summarize the topic content in a clear, coherent way instead of listing isolated fragments.",
+			"- Connect the current question to the selected topic naturally when useful.",
+		}...)
+	}
+
+	if containsAny(q, "when", "does", "is", "are", "can", "will", "should") {
+		intentRules = append(intentRules,
+			"- For simple factual questions, start with the answer immediately, then add only the explanation that helps the user.",
+		)
+	}
+
+	if containsAny(q, "difference between", "compare", "vs", "versus") {
+		intentRules = append(intentRules,
+			"- For comparison questions, present clear-cut differences point by point.",
+			"- Name the compared items explicitly and contrast them on the most relevant criteria.",
+			"- Avoid vague comparison wording; make the distinction easy to scan and understand.",
+		)
 	}
 
 	return intentRules

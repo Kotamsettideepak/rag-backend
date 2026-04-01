@@ -7,7 +7,7 @@ import (
 
 func BuildContextResult(question string, matches []model.SearchMatch, store *vector.Repository) model.SearchContextResult {
 	if len(matches) == 0 {
-		return model.SearchContextResult{Context: "", Modality: ModalityMixed}
+		return model.SearchContextResult{Context: "", Modality: ModalityMixed, FinalK: 0}
 	}
 
 	audio := filterByKind(matches, ModalityAudio)
@@ -17,14 +17,18 @@ func BuildContextResult(question string, matches []model.SearchMatch, store *vec
 
 	switch {
 	case len(video) > 0 && len(audio) == 0 && len(images) == 0 && len(pdfs) == 0:
-		return buildVideoResult(question, matches, store)
+		result := buildVideoResult(question, matches, store)
+		result.FinalK = len(matches)
+		return result
 	case len(audio) > 0 && len(images) == 0 && len(pdfs) == 0:
-		return buildAudioResult(question, matches, store)
+		result := buildAudioResult(question, matches, store)
+		result.FinalK = len(matches)
+		return result
 	case len(images) > 0 && len(audio) == 0 && len(pdfs) == 0:
-		return model.SearchContextResult{Context: joinDocs(matches), Modality: ModalityImage}
+		return model.SearchContextResult{Context: joinDocs(matches), Modality: ModalityImage, FinalK: len(matches)}
 	case len(pdfs) > 0 && len(audio) == 0 && len(images) == 0:
-		return model.SearchContextResult{Context: joinDocs(matches), Modality: ModalityPDF}
+		return model.SearchContextResult{Context: joinDocs(matches), Modality: ModalityPDF, FinalK: len(matches)}
 	default:
-		return model.SearchContextResult{Context: joinDocs(matches), Modality: ModalityMixed}
+		return model.SearchContextResult{Context: joinDocs(matches), Modality: ModalityMixed, FinalK: len(matches)}
 	}
 }

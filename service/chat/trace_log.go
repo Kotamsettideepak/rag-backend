@@ -7,14 +7,16 @@ import (
 
 type questionTraceLog struct {
 	Question         string `json:"question"`
+	FinalK           int    `json:"final_k"`
 	FetchedContext   string `json:"fetched_context"`
 	ContextSentToLLM string `json:"context_sent_to_llm"`
 	ResponseFromLLM  string `json:"response_from_llm"`
 }
 
-func logQuestionTrace(question, fetchedContext, contextSentToLLM, responseFromLLM string) {
+func logQuestionTrace(question string, finalK int, fetchedContext, contextSentToLLM, responseFromLLM string) {
 	payload := questionTraceLog{
 		Question:         question,
+		FinalK:           finalK,
 		FetchedContext:   fetchedContext,
 		ContextSentToLLM: contextSentToLLM,
 		ResponseFromLLM:  responseFromLLM,
@@ -26,4 +28,3 @@ func logQuestionTrace(question, fetchedContext, contextSentToLLM, responseFromLL
 	}
 	log.Printf("[chat-trace] %s", string(raw))
 }
-

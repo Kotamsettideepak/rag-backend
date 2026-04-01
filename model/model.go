@@ -12,6 +12,7 @@ type SearchMatch struct {
 type SearchContextResult struct {
 	Context  string
 	Modality string
+	FinalK   int
 }
 
 type UploadJobStatus string

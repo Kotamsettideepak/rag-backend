@@ -3,9 +3,17 @@ package ingestion
 import "strings"
 
 func resolveTopK(question string, max int) (string, int, int) {
+	return resolveTopKForScope(question, max, "query")
+}
+
+func resolveTopicTopK(question string, max int) (string, int, int) {
+	return resolveTopKForScope(question, max, "topic")
+}
+
+func resolveTopKForScope(question string, max int, scope string) (string, int, int) {
 	norm := strings.ToLower(strings.TrimSpace(question))
 	if norm == "" {
-		return "simple", candidateTopK("simple", max), finalTopK("simple")
+		return "simple", candidateTopK(scope, "simple", max), finalTopK(scope, "simple")
 	}
 	score := 0
 	if len(strings.Fields(norm)) >= 7 {
@@ -21,11 +29,11 @@ func resolveTopK(question string, max int) (string, int, int) {
 	}
 	switch {
 	case score >= 3:
-		return "complex", candidateTopK("complex", max), finalTopK("complex")
+		return "complex", candidateTopK(scope, "complex", max), finalTopK(scope, "complex")
 	case score >= 1:
-		return "medium", candidateTopK("medium", max), finalTopK("medium")
+		return "medium", candidateTopK(scope, "medium", max), finalTopK(scope, "medium")
 	default:
-		return "simple", candidateTopK("simple", max), finalTopK("simple")
+		return "simple", candidateTopK(scope, "simple", max), finalTopK(scope, "simple")
 	}
 }
 
@@ -39,7 +47,17 @@ func clampTopK(desired, max int) int {
 	return desired
 }
 
-func candidateTopK(level string, max int) int {
+func candidateTopK(scope, level string, max int) int {
+	if scope == "topic" {
+		switch level {
+		case "complex":
+			return clampTopK(envInt("TOPIC_QUERY_CANDIDATE_TOP_K_COMPLEX", 140), max)
+		case "medium":
+			return clampTopK(envInt("TOPIC_QUERY_CANDIDATE_TOP_K_MEDIUM", 110), max)
+		default:
+			return clampTopK(envInt("TOPIC_QUERY_CANDIDATE_TOP_K_SIMPLE", 80), max)
+		}
+	}
 	switch level {
 	case "complex":
 		return clampTopK(envInt("QUERY_CANDIDATE_TOP_K_COMPLEX", 80), max)
@@ -50,7 +68,17 @@ func candidateTopK(level string, max int) int {
 	}
 }
 
-func finalTopK(level string) int {
+func finalTopK(scope, level string) int {
+	if scope == "topic" {
+		switch level {
+		case "complex":
+			return envInt("TOPIC_QUERY_FINAL_TOP_K_COMPLEX", 28)
+		case "medium":
+			return envInt("TOPIC_QUERY_FINAL_TOP_K_MEDIUM", 22)
+		default:
+			return envInt("TOPIC_QUERY_FINAL_TOP_K_SIMPLE", 16)
+		}
+	}
 	switch level {
 	case "complex":
 		return envInt("QUERY_FINAL_TOP_K_COMPLEX", 16)

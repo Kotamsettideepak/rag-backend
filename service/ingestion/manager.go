@@ -15,6 +15,7 @@ import (
 	"gin-backend/service/ingestion/embedding"
 	"gin-backend/service/ingestion/extractor"
 	"gin-backend/service/ingestion/parser"
+	"gin-backend/service/rerank"
 	retrievalsvc "gin-backend/service/retrieval"
 
 	"github.com/google/uuid"
@@ -27,6 +28,7 @@ type Manager struct {
 	chunker        *chunker.Chunker
 	embedder       *embedding.Service
 	store          *vector.Repository
+	reranker       *rerank.Service
 	pool           *worker.Pool
 	jobQueue       chan queuedJob
 	jobs           map[string]*model.UploadJob
@@ -47,13 +49,14 @@ type queuedJob struct {
 }
 
 // NewManager constructs a ready-to-use Manager.
-func NewManager(svc *embedding.Service) *Manager {
+func NewManager(svc *embedding.Service, reranker *rerank.Service) *Manager {
 	m := &Manager{
 		parser:         parser.New(),
 		router:         extractor.NewRouter(),
 		chunker:        chunker.New(envInt("INGEST_CHUNK_SIZE", 3500), envInt("INGEST_CHUNK_OVERLAP", 700)),
 		embedder:       svc,
 		store:          vector.NewRepository(),
+		reranker:       reranker,
 		jobs:           make(map[string]*model.UploadJob),
 		jobSubs:        make(map[string]map[string]chan *model.UploadJob),
 		storeBatchSize: 64,
@@ -199,6 +202,7 @@ func (m *Manager) SearchContext(ctx context.Context, question, chatID, userID st
 	if err != nil {
 		return model.SearchContextResult{}, err
 	}
+	matches = m.rerankMatches(ctx, question, matches)
 	if finalK > 0 && len(matches) > finalK {
 		matches = matches[:finalK]
 	}
@@ -212,11 +216,12 @@ func (m *Manager) SearchTopicContext(ctx context.Context, question, topicID stri
 		return model.SearchContextResult{}, err
 	}
 
-	_, candidateK, finalK := resolveTopK(question, m.queryTopK)
+	_, candidateK, finalK := resolveTopicTopK(question, m.queryTopK)
 	matches, err := m.store.Search(embedding, candidateK, map[string]interface{}{"topic_id": topicID})
 	if err != nil {
 		return model.SearchContextResult{}, err
 	}
+	matches = m.rerankMatches(ctx, question, matches)
 	if finalK > 0 && len(matches) > finalK {
 		matches = matches[:finalK]
 	}
@@ -226,4 +231,17 @@ func (m *Manager) SearchTopicContext(ctx context.Context, question, topicID stri
 
 func (m *Manager) VectorStore() *vector.Repository {
 	return m.store
+}
+
+func (m *Manager) rerankMatches(ctx context.Context, query string, matches []model.SearchMatch) []model.SearchMatch {
+	if m.reranker == nil || len(matches) <= 1 {
+		return matches
+	}
+
+	ranked, err := m.reranker.Rank(ctx, query, matches)
+	if err != nil {
+		log.Printf("[rerank] fallback_to_vector_order err=%v", err)
+		return matches
+	}
+	return ranked
 }
