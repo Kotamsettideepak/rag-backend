@@ -1,6 +1,8 @@
 package groq
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -23,7 +25,7 @@ type Message struct {
 
 type LLMClient interface {
 	GenerateResponse(messages []Message) (string, error)
-	StreamResponse(messages []Message, stream chan string) error
+	StreamResponse(messages []Message, stream chan StreamEvent) error
 }
 
 type Client struct {
@@ -46,6 +48,10 @@ type chatCompletionResponse struct {
 			Content string `json:"content"`
 		} `json:"message"`
 	} `json:"choices"`
+	Message struct {
+		Content string `json:"content"`
+	} `json:"message"`
+	Response string `json:"response"`
 }
 
 type streamChunkResponse struct {
@@ -54,6 +60,13 @@ type streamChunkResponse struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Thinking string `json:"thinking"`
+	Content string `json:"content"`
+}
+
+type StreamEvent struct {
+	Thinking string
+	Content  string
 }
 
 func NewClient() LLMClient {
@@ -102,21 +115,71 @@ func (g *Client) GenerateResponse(messages []Message) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	var parsed chatCompletionResponse
-	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", err
-	}
-	if len(parsed.Choices) == 0 {
-		return "", fmt.Errorf("groq response contained no choices")
-	}
-
-	return parsed.Choices[0].Message.Content, nil
+	return extractResponseText(body)
 }
 
-func (g *Client) StreamResponse(messages []Message, stream chan string) error {
+func (g *Client) StreamResponse(messages []Message, stream chan StreamEvent) error {
 	return g.doChatCompletionStream(context.Background(), chatCompletionRequest{
 		Messages: messages,
 		Stream:   true,
 	}, stream)
+}
+
+func (g *Client) usesColabAPI() bool {
+	base := strings.ToLower(strings.TrimSpace(g.baseURL))
+	return strings.Contains(base, ".loca.lt") || strings.HasSuffix(base, "/v1/chat")
+}
+
+func extractResponseText(body []byte) (string, error) {
+	var parsed chatCompletionResponse
+	if err := json.Unmarshal(body, &parsed); err == nil {
+		if len(parsed.Choices) > 0 && strings.TrimSpace(parsed.Choices[0].Message.Content) != "" {
+			return parsed.Choices[0].Message.Content, nil
+		}
+		if strings.TrimSpace(parsed.Message.Content) != "" {
+			return parsed.Message.Content, nil
+		}
+		if strings.TrimSpace(parsed.Response) != "" {
+			return parsed.Response, nil
+		}
+	}
+
+	// Some local tunnel test deployments return an SSE body even for non-stream
+	// callers, so recover the text from accumulated data: ... lines.
+	if text := extractSSEText(body); strings.TrimSpace(text) != "" {
+		return text, nil
+	}
+
+	return "", fmt.Errorf("llm response contained no content")
+}
+
+func extractSSEText(body []byte) string {
+	scanner := bufio.NewScanner(bytes.NewReader(body))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var out strings.Builder
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		payload := strings.TrimPrefix(line, "data: ")
+		if payload == "[DONE]" {
+			break
+		}
+
+		var parsed streamChunkResponse
+		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
+			continue
+		}
+		if len(parsed.Choices) > 0 && parsed.Choices[0].Delta.Content != "" {
+			out.WriteString(parsed.Choices[0].Delta.Content)
+			continue
+		}
+		if parsed.Content != "" {
+			out.WriteString(parsed.Content)
+		}
+	}
+
+	return out.String()
 }

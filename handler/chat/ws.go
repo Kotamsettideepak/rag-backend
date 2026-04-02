@@ -26,6 +26,7 @@ type wsRequest struct {
 type wsResponse struct {
 	Type    string `json:"type"`
 	Content string `json:"content,omitempty"`
+	Thinking string `json:"thinking,omitempty"`
 	Answer  string `json:"answer,omitempty"`
 	Message string `json:"message,omitempty"`
 }
@@ -75,10 +76,14 @@ func streamAnswer(conn *websocket.Conn, chatID, topicID, question string, histor
 	if topicID != "" {
 		answer, err = chatservice.Default().StreamTopicAnswer(context.Background(), topicID, question, history, func(chunk string) error {
 			return websocket.JSON.Send(conn, wsResponse{Type: "chunk", Content: chunk})
+		}, func(thinking string) error {
+			return websocket.JSON.Send(conn, wsResponse{Type: "thinking", Thinking: thinking})
 		})
 	} else {
 		answer, err = chatservice.Default().StreamAnswer(context.Background(), user.ID, chatID, question, func(chunk string) error {
 			return websocket.JSON.Send(conn, wsResponse{Type: "chunk", Content: chunk})
+		}, func(thinking string) error {
+			return websocket.JSON.Send(conn, wsResponse{Type: "thinking", Thinking: thinking})
 		})
 	}
 	if err != nil {

@@ -11,8 +11,8 @@ import (
 	"time"
 )
 
-func (g *Client) doChatCompletionStream(ctx context.Context, payload chatCompletionRequest, stream chan string) error {
-	if g.apiKey == "" {
+func (g *Client) doChatCompletionStream(ctx context.Context, payload chatCompletionRequest, stream chan StreamEvent) error {
+	if g.apiKey == "" && !g.usesColabAPI() {
 		return fmt.Errorf("GROQ_API_KEY is required")
 	}
 	var lastErr error
@@ -55,7 +55,7 @@ func (g *Client) doChatCompletionStream(ctx context.Context, payload chatComplet
 	return fmt.Errorf("groq stream failed after %d attempts: %w", g.maxRetries, lastErr)
 }
 
-func parseStream(body io.Reader, stream chan string) error {
+func parseStream(body io.Reader, stream chan StreamEvent) error {
 	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	for scanner.Scan() {
@@ -71,11 +71,17 @@ func parseStream(body io.Reader, stream chan string) error {
 		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 			return err
 		}
+		if parsed.Thinking != "" {
+			stream <- StreamEvent{Thinking: parsed.Thinking}
+		}
 		if len(parsed.Choices) == 0 {
+			if parsed.Content != "" {
+				stream <- StreamEvent{Content: parsed.Content}
+			}
 			continue
 		}
 		if chunk := parsed.Choices[0].Delta.Content; chunk != "" {
-			stream <- chunk
+			stream <- StreamEvent{Content: chunk}
 		}
 	}
 	return scanner.Err()

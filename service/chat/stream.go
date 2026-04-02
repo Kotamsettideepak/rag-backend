@@ -13,6 +13,7 @@ func (s *Service) StreamAnswer(
 	ctx context.Context,
 	userID, chatID, question string,
 	onChunk func(string) error,
+	onThinking func(string) error,
 ) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
@@ -37,13 +38,13 @@ func (s *Service) StreamAnswer(
 	}
 
 	p := prompt.Build(result.Modality, history, result.Context, question)
-	stream := make(chan string)
+	stream := make(chan groq.StreamEvent)
 	done := make(chan error, 1)
 	go func() {
 		done <- groqClient().StreamResponse([]groq.Message{{Role: "user", Content: p}}, stream)
 	}()
 
-	answer, err := collectStream(ctx, stream, done, onChunk)
+	answer, err := collectStream(ctx, stream, done, onChunk, onThinking)
 	if err != nil {
 		return "", err
 	}
@@ -59,6 +60,7 @@ func (s *Service) StreamTopicAnswer(
 	topicID, question string,
 	history []prompt.HistoryMessage,
 	onChunk func(string) error,
+	onThinking func(string) error,
 ) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
@@ -75,13 +77,13 @@ func (s *Service) StreamTopicAnswer(
 	}
 
 	p := prompt.BuildTopic(topic.Name, result.Modality, history, result.Context, question)
-	stream := make(chan string)
+	stream := make(chan groq.StreamEvent)
 	done := make(chan error, 1)
 	go func() {
 		done <- groqClient().StreamResponse([]groq.Message{{Role: "user", Content: p}}, stream)
 	}()
 
-	answer, err := collectStream(ctx, stream, done, onChunk)
+	answer, err := collectStream(ctx, stream, done, onChunk, onThinking)
 	if err != nil {
 		return "", err
 	}

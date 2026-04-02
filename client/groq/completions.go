@@ -7,11 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
 func (g *Client) doChatCompletion(ctx context.Context, payload chatCompletionRequest) ([]byte, error) {
-	if g.apiKey == "" {
+	if g.apiKey == "" && !g.usesColabAPI() {
 		return nil, fmt.Errorf("GROQ_API_KEY is required")
 	}
 	var lastErr error
@@ -53,11 +54,20 @@ func (g *Client) doChatCompletion(ctx context.Context, payload chatCompletionReq
 }
 
 func (g *Client) doRequest(ctx context.Context, body []byte) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, g.baseURL+"/chat/completions", bytes.NewBuffer(body))
+	endpoint := g.baseURL + "/chat/completions"
+	if g.usesColabAPI() {
+		endpoint = g.baseURL
+		if !strings.HasSuffix(strings.ToLower(endpoint), "/v1/chat") {
+			endpoint = strings.TrimRight(endpoint, "/") + "/v1/chat"
+		}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBuffer(body))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+g.apiKey)
+	if !g.usesColabAPI() && g.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+g.apiKey)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	return g.client.Do(req)
 }
