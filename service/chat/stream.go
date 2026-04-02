@@ -15,7 +15,7 @@ func (s *Service) StreamAnswer(
 	onChunk func(string) error,
 	onThinking func(string) error,
 ) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
 	if _, err := s.chats.Get(ctx, chatID, userID); err != nil {
@@ -62,7 +62,7 @@ func (s *Service) StreamTopicAnswer(
 	onChunk func(string) error,
 	onThinking func(string) error,
 ) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
 	topic, err := s.topics.Get(ctx, topicID)

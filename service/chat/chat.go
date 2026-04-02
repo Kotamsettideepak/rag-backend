@@ -12,7 +12,7 @@ import (
 )
 
 func (s *Service) Answer(ctx context.Context, userID, chatID, question string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
 	if _, err := s.chats.Get(ctx, chatID, userID); err != nil {
@@ -55,7 +55,7 @@ func (s *Service) ListTopics(ctx context.Context, limit int) ([]repository.Topic
 }
 
 func (s *Service) AnswerTopic(ctx context.Context, topicID, question string, history []prompt.HistoryMessage) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 180*time.Second)
 	defer cancel()
 
 	topic, err := s.topics.Get(ctx, topicID)
